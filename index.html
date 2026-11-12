@@ -149,8 +149,48 @@
       margin: 0 auto;
       border-radius: 20px;
       overflow: hidden;
-      background: repeating-conic-gradient(#2a2e27 0 25%, #353a31 0 50%) 0 0/16px 16px
+      background: var(--pvbg)
     }
+    
+    :root, body { --pvbg: repeating-conic-gradient(#2a2e27 0 25%, #353a31 0 50%) 0 0/16px 16px }
+    body[data-bg=white] { --pvbg: #fff }
+    body[data-bg=black] { --pvbg: #000 }
+    body[data-bg=grey] { --pvbg: #808080 }
+    body[data-bg=hc] { --pvbg: repeating-conic-gradient(#000 0 25%, #fff 0 50%) 0 0/16px 16px }
+    
+    #bgs { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap }
+    #bgs .hint { margin-right: 4px }
+    #bgs button { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--outline); cursor: pointer; padding: 0 }
+    #bgs button.on { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary) }
+    #bgs button[data-b=checker] { background: repeating-conic-gradient(#2a2e27 0 25%, #353a31 0 50%) 0 0/8px 8px }
+    #bgs button[data-b=white] { background: #fff }
+    #bgs button[data-b=black] { background: #000 }
+    #bgs button[data-b=grey] { background: #808080 }
+    #bgs button[data-b=hc] { background: repeating-conic-gradient(#000 0 25%, #fff 0 50%) 0 0/8px 8px }
+    
+    #dock {
+      position: fixed;
+      left: 0; right: 0;
+      top: 0;
+      height: calc(50vh);
+      padding-top: var(--safe-area-inset-top, 0px);
+      z-index: 8;
+      background: var(--surface);
+      box-shadow: 0 4px 16px rgba(0,0,0,.5);
+      transform: translateY(-110%);
+      transition: transform .2s;
+      pointer-events: none
+    }
+    #dock.show { transform: none; pointer-events: auto }
+    #dock .dstage {
+      position: absolute;
+      inset: calc(var(--safe-area-inset-top, 0px) + 8px) 8px 8px 8px;
+      border-radius: 16px;
+      overflow: hidden;
+      background: var(--pvbg)
+    }
+    #dock canvas { cursor: default }
+    #dock .iconbtn { position: absolute; right: 8px; bottom: 8px; z-index: 2 }
     
     canvas {
       position: absolute;
@@ -820,6 +860,8 @@
       </svg></div>
     <h1>Chroma Key Studio</h1>
   </header>
+  <div id="dock" aria-hidden="true"><div class="dstage"><canvas id="cv2" width="480" height="270"></canvas>
+    <button class="iconbtn" id="pp2" type="button" aria-label="Play or pause"><svg id="ppi2" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg></button></div></div>
   <main>
     <input type="file" id="file" accept="video/*" hidden>
     
@@ -842,6 +884,13 @@
                                                                                                                                   viewBox="0 0 24 24">
             <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
           </svg></button>
+      </div>
+      <div id="bgs"><span class="hint">Background</span>
+        <button type="button" data-b="checker" class="on" aria-label="Checkerboard"></button>
+        <button type="button" data-b="white" aria-label="White"></button>
+        <button type="button" data-b="black" aria-label="Black"></button>
+        <button type="button" data-b="grey" aria-label="Grey"></button>
+        <button type="button" data-b="hc" aria-label="High contrast checkerboard"></button>
       </div>
       <div class="keyrow">
         <div class="t"><b id="kc">Key colors: 1</b><span class="hint">Tap the preview to add each color to
@@ -949,6 +998,20 @@ const cv=$('cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
 let keys=[[0,255,0]],keyDefault=true,loaded=false;
 const paint=el=>el.style.setProperty('--p',((el.value-el.min)/(el.max-el.min)*100)+'%');
 ['sim','smo','fps','wd','q'].forEach(k=>{paint($(k));$(k).oninput=()=>{$(k+'o').textContent=$(k).value;paint($(k));draw()}});
+const cv2=$('cv2'),ctx2=cv2.getContext('2d');let dockOn=false;
+document.querySelectorAll('#bgs button').forEach(b=>b.onclick=()=>{
+  document.body.dataset.bg=b.dataset.b;
+  document.querySelectorAll('#bgs button').forEach(x=>x.classList.toggle('on',x===b));
+});
+let stagePast=false;
+function updateDock(){
+  const o=$('out'),hit=o.childElementCount>0&&o.getBoundingClientRect().top<$('dock').offsetHeight;
+  const on=loaded&&stagePast&&!hit;
+  if(on===dockOn)return;
+  dockOn=on;$('dock').classList.toggle('show',on);$('dock').setAttribute('aria-hidden',!on);if(on)draw();
+}
+new IntersectionObserver(([e])=>{stagePast=e.intersectionRatio<0.5&&e.boundingClientRect.top<0;updateDock()},{threshold:[0.5]}).observe(document.querySelector('.stage'));
+addEventListener('scroll',updateDock,{passive:true});addEventListener('resize',updateDock);
 const pick=()=>$('file').click();
 $('pick').onclick=pick;$('change').onclick=pick;
 document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{
@@ -956,7 +1019,7 @@ document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));
   $('qrow').classList.toggle('dim',b.dataset.v==='gif');
 });
-const setIcon=()=>{$('ppi').innerHTML=v.paused?'<path d="M8 5v14l11-7z"/>':'<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>'};
+const setIcon=()=>{const h=v.paused?'<path d="M8 5v14l11-7z"/>':'<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';$('ppi').innerHTML=h;$('ppi2').innerHTML=h};
 v.addEventListener('play',setIcon);v.addEventListener('pause',setIcon);
 $('spill').onchange=draw;
 
@@ -998,6 +1061,7 @@ function draw(){
   ctx.clearRect(0,0,cv.width,cv.height);
   ctx.drawImage(v,0,0,cv.width,cv.height);
   const im=ctx.getImageData(0,0,cv.width,cv.height);keyFrame(im.data);ctx.putImageData(im,0,0);
+  if(dockOn){if(cv2.width!==cv.width||cv2.height!==cv.height){cv2.width=cv.width;cv2.height=cv.height}ctx2.clearRect(0,0,cv2.width,cv2.height);ctx2.drawImage(cv,0,0)}
 }
 let raf;function loop(){if(!exporting)draw();raf=requestAnimationFrame(loop)}
 $('file').onchange=e=>{
@@ -1009,7 +1073,7 @@ $('file').onchange=e=>{
   wd.value=Math.min(+wd.value,vw);$('wdo').textContent=wd.value;paint(wd);
   v.play().catch(()=>{});draw();cancelAnimationFrame(raf);loop()};
 };
-$('pp').onclick=()=>v.paused?v.play():v.pause();
+$('pp').onclick=$('pp2').onclick=()=>v.paused?v.play():v.pause();
 cv.onclick=e=>{
   if(!loaded)return;
   const wasPaused=v.paused;

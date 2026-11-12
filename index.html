@@ -953,7 +953,7 @@
       </div>
       <div class="sl">
         <div class="top"><label for="fps">Frame rate</label><output id="fpso">10</output></div><input type="range" id="fps" min="5"
-                                                                                                                                max="20"
+                                                                                                                                max="30"
                                                                                                                                 value="10">
       </div>
       <div class="sl">
@@ -1080,8 +1080,10 @@ function draw(){
   if(dockOn){if(cv2.width!==cv.width||cv2.height!==cv.height){cv2.width=cv.width;cv2.height=cv.height}ctx2.clearRect(0,0,cv2.width,cv2.height);ctx2.drawImage(cv,0,0)}
 }
 let raf;function loop(){if(!exporting)draw();raf=requestAnimationFrame(loop)}
+let srcBase='video';
 $('file').onchange=e=>{
   const f=e.target.files[0];if(!f)return;
+  srcBase=f.name.replace(/\.[^.]*$/,'')||'video';
   v.src=URL.createObjectURL(f);
   v.onloadeddata=()=>{loaded=true;$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(Math.min(480,v.videoWidth));
   document.querySelector('.stage').style.aspectRatio=v.videoWidth+' / '+v.videoHeight;
@@ -1325,7 +1327,7 @@ $('go').onclick=async()=>{
     const bin=isGif?buildGif(frames,w,h,Math.round(100/fps),P.pal):buildWebp(frames,w,h,Math.round(1000/fps));
     const url=URL.createObjectURL(new Blob([bin],{type:isGif?'image/gif':'image/webp'}));
     const ext=isGif?'gif':'webp';
-    $('out').innerHTML='<div class="res"><img src="'+url+'" alt="Result"></div><a class="btn tonal" href="'+url+'" download="transparent.'+ext+'"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>Download '+ext.toUpperCase()+' · '+(bin.length/1024|0)+' KB</a>';$('out').scrollIntoView({behavior:'smooth',block:'nearest'});
+    $('out').innerHTML='<div class="res"><img src="'+url+'" alt="Result"></div><a class="btn tonal" href="'+url+'" download="keyed_'+srcBase.replace(/["<>&]/g,'_')+'.'+ext+'"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>Download '+ext.toUpperCase()+' · '+(bin.length/1024|0)+' KB</a>';$('out').scrollIntoView({behavior:'smooth',block:'nearest'});
   }catch(e){if(e.message==='__cancel')$('out').innerHTML='';else{$('out').innerHTML='<div class="err"></div>';$('out').firstChild.textContent='Export failed: '+e.message}}
   exporting=false;cancelReq=false;$('cfm').hidden=true;relWL();$('dlg').classList.remove('show');$('go').disabled=false;v.play().catch(()=>{});
 };

@@ -871,7 +871,7 @@
   <div id="dock" aria-hidden="true"><div class="dstage"><canvas id="cv2" width="480" height="270"></canvas>
     <button class="iconbtn" id="pp2" type="button" aria-label="Play or pause"><svg id="ppi2" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg></button></div></div>
   <main>
-    <input type="file" id="file" accept="video/*" hidden>
+    <input type="file" id="file" accept="video/*,image/gif,image/webp" hidden>
     
     <section class="card low">
       <div class="stage">
@@ -880,13 +880,13 @@
           <div class="ic"><svg viewBox="0 0 24 24">
               <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" />
             </svg></div>
-          <div>No video selected<div class="hint">Pick a clip to start keying</div>
+          <div>No file selected<div class="hint">Pick a video, GIF or WebP to start keying</div>
           </div>
-          <button class="btn" id="pick" type="button">Select video</button>
+          <button class="btn" id="pick" type="button">Select file</button>
         </div>
       </div>
       <div class="actions">
-        <button class="btn tonal" id="change" type="button" hidden>Change video</button>
+        <button class="btn tonal" id="change" type="button" hidden>Change file</button>
         <span class="grow"></span>
         <button class="iconbtn" id="pp" type="button" disabled aria-label="Play or pause"><svg id="ppi"
                                                                                                                                   viewBox="0 0 24 24">
@@ -1009,7 +1009,50 @@
     </svg>Export</button>
   <script>
     const $=id=>document.getElementById(id);
-const v=document.createElement('video');v.muted=true;v.loop=true;v.playsInline=true;
+const vid=document.createElement('video');vid.muted=true;vid.loop=true;vid.playsInline=true;let v=vid;
+/* Video-like wrapper around decoded frames of an animated GIF/WebP */
+class AnimMedia extends EventTarget{
+  constructor(frames,w,h){
+    super();this.frames=frames;this.videoWidth=w;this.videoHeight=h;
+    this.duration=frames[frames.length-1].end;this.paused=true;this._t=0;this._t0=0;this._i=-1;
+    this._c=document.createElement('canvas');this._c.width=w;this._c.height=h;this._x=this._c.getContext('2d');
+  }
+  get currentTime(){
+    if(this.paused)return this._t;
+    return Math.max(0,((performance.now()-this._t0)/1000)%this.duration);
+  }
+  set currentTime(t){
+    this._t=Math.max(0,Math.min(this.duration-1e-6,t));
+    if(!this.paused)this._t0=performance.now()-this._t*1000;
+    setTimeout(()=>this.dispatchEvent(new Event('seeked')),0);
+  }
+  get el(){
+    const t=this.currentTime,f=this.frames;let i=this._i<0?0:this._i;
+    if(t<f[i].start)i=0;
+    while(i<f.length-1&&t>=f[i].end)i++;
+    if(i!==this._i){this._i=i;this._x.clearRect(0,0,this.videoWidth,this.videoHeight);this._x.drawImage(f[i].bmp,0,0)}
+    return this._c;
+  }
+  play(){if(!this.paused)return Promise.resolve();this.paused=false;this._t0=performance.now()-this._t*1000;this.dispatchEvent(new Event('play'));return Promise.resolve()}
+  pause(){if(this.paused)return;this._t=this.currentTime;this.paused=true;this.dispatchEvent(new Event('pause'))}
+}
+async function decodeAnim(f){
+  if(!('ImageDecoder' in window))throw new Error('This browser cannot decode animated GIF/WebP files (ImageDecoder is not supported). Try a recent Chrome.');
+  const type=f.type||(/\.webp$/i.test(f.name)?'image/webp':'image/gif');
+  const dec=new ImageDecoder({data:await f.arrayBuffer(),type});
+  await dec.tracks.ready;await dec.completed;
+  const n=dec.tracks.selectedTrack.frameCount,frames=[];let t=0,w=0,h=0;
+  for(let i=0;i<n;i++){
+    const {image}=await dec.decode({frameIndex:i});
+    let d=(image.duration||0)/1e6;if(d<0.02)d=0.1;
+    w=image.displayWidth;h=image.displayHeight;
+    const bmp=await createImageBitmap(image);image.close();
+    frames.push({bmp,start:t,end:t+d});t+=d;
+  }
+  dec.close();
+  if(!frames.length)throw new Error('No frames found in this file.');
+  return new AnimMedia(frames,w,h);
+}
 const cv=$('cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
 let keys=[[0,255,0]],keyDefault=true,loaded=false;
 const paint=el=>el.style.setProperty('--p',((el.value-el.min)/(el.max-el.min)*100)+'%');
@@ -1036,7 +1079,7 @@ document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{
   $('qrow').classList.toggle('dim',b.dataset.v==='gif');$('drow').hidden=b.dataset.v!=='gif';
 });
 const setIcon=()=>{const h=v.paused?'<path d="M8 5v14l11-7z"/>':'<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';$('ppi').innerHTML=h;$('ppi2').innerHTML=h};
-v.addEventListener('play',setIcon);v.addEventListener('pause',setIcon);
+vid.addEventListener('play',setIcon);vid.addEventListener('pause',setIcon);
 $('spill').onchange=draw;
 
 function cbcr(r,g,b){return[-0.169*r-0.331*g+0.5*b,0.5*r-0.419*g-0.081*b]}
@@ -1075,28 +1118,40 @@ function fit(w){const h=Math.round(w*v.videoHeight/v.videoWidth);if(cv.width!==w
 function draw(){
   if(!loaded)return;
   ctx.clearRect(0,0,cv.width,cv.height);
-  ctx.drawImage(v,0,0,cv.width,cv.height);
+  ctx.drawImage(v.el||v,0,0,cv.width,cv.height);
   const im=ctx.getImageData(0,0,cv.width,cv.height);keyFrame(im.data);ctx.putImageData(im,0,0);
   if(dockOn){if(cv2.width!==cv.width||cv2.height!==cv.height){cv2.width=cv.width;cv2.height=cv.height}ctx2.clearRect(0,0,cv2.width,cv2.height);ctx2.drawImage(cv,0,0)}
 }
 let raf;function loop(){if(!exporting)draw();raf=requestAnimationFrame(loop)}
 let srcBase='video';
-$('file').onchange=e=>{
+const ready=()=>{loaded=true;$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(Math.min(480,v.videoWidth));
+document.querySelector('.stage').style.aspectRatio=v.videoWidth+' / '+v.videoHeight;
+const wd=$('wd'),vw=v.videoWidth;wd.max=vw;wd.min=Math.min(120,vw);wd.step=1;
+wd.value=Math.min(+wd.value,vw);$('wdo').textContent=wd.value;paint(wd);
+v.play().catch(()=>{});setIcon();draw();cancelAnimationFrame(raf);loop()};
+$('file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
+  e.target.value='';
   srcBase=f.name.replace(/\.[^.]*$/,'')||'video';
-  v.src=URL.createObjectURL(f);
-  v.onloadeddata=()=>{loaded=true;$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(Math.min(480,v.videoWidth));
-  document.querySelector('.stage').style.aspectRatio=v.videoWidth+' / '+v.videoHeight;
-  const wd=$('wd'),vw=v.videoWidth;wd.max=vw;wd.min=Math.min(120,vw);wd.step=1;
-  wd.value=Math.min(+wd.value,vw);$('wdo').textContent=wd.value;paint(wd);
-  v.play().catch(()=>{});draw();cancelAnimationFrame(raf);loop()};
+  v.pause();
+  if(f.type.startsWith('image/')||/\.(gif|webp)$/i.test(f.name)){
+    const hint=document.querySelector('#empty .hint'),old=hint.textContent;hint.textContent='Decoding frames…';
+    try{
+      const a=await decodeAnim(f);
+      a.addEventListener('play',setIcon);a.addEventListener('pause',setIcon);
+      v=a;ready();
+    }catch(err){alert(err.message||'Could not read this file.')}
+    hint.textContent=old;
+  }else{
+    v=vid;vid.src=URL.createObjectURL(f);vid.onloadeddata=ready;
+  }
 };
 $('pp').onclick=$('pp2').onclick=()=>v.paused?v.play():v.pause();
 cv.onclick=e=>{
   if(!loaded)return;
   const wasPaused=v.paused;
   const t=document.createElement('canvas');t.width=cv.width;t.height=cv.height;
-  const c=t.getContext('2d');c.drawImage(v,0,0,t.width,t.height);
+  const c=t.getContext('2d');c.drawImage(v.el||v,0,0,t.width,t.height);
   const r=cv.getBoundingClientRect();
   const x=Math.floor((e.clientX-r.left)*cv.width/r.width),y=Math.floor((e.clientY-r.top)*cv.height/r.height);
   const p=c.getImageData(x,y,1,1).data;const nk=[p[0],p[1],p[2]];
@@ -1297,7 +1352,7 @@ $('go').onclick=async()=>{
     for(let i=0;i<total;i++){
       await seek(Math.min(i/fps,v.duration-0.01));
       if(cancelReq)throw CANCEL();
-      x.clearRect(0,0,w,h);x.drawImage(v,0,0,w,h);
+      x.clearRect(0,0,w,h);x.drawImage(v.el||v,0,0,w,h);
       const im=x.getImageData(0,0,w,h);keyFrame(im.data);
       if($('fmt').value==='gif')frames.push(im.data);
       else{

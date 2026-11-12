@@ -1242,7 +1242,7 @@ function buildWebp(frames,w,h,ms){
 let exporting=false,cancelReq=false;
 $('xbtn').onclick=()=>{$('xbtn').hidden=true;$('cfm').hidden=false};
 $('cno').onclick=()=>{$('cfm').hidden=true;$('xbtn').hidden=false};
-$('cyes').onclick=()=>{cancelReq=true;$('cfm').hidden=true;$('dtxt').textContent='Stopping…'};
+$('cyes').onclick=()=>{cancelReq=true;if(abortWait)abortWait();$('cfm').hidden=true;$('dtxt').textContent='Stopping…'};
 let wl=null;
 let nsv=null;
 const nsOn=()=>{try{if(!nsv){nsv=document.createElement('video');nsv.muted=true;nsv.loop=true;nsv.setAttribute('playsinline','');nsv.setAttribute('muted','');nsv.style.cssText='position:fixed;width:1px;height:1px;opacity:.01;pointer-events:none';
@@ -1251,7 +1251,39 @@ const nsOff=()=>{try{nsv&&(nsv.pause(),nsv.remove())}catch(e){}nsv=null};
 const getWL=async()=>{if(!('wakeLock' in navigator)){nsOn();return}try{if(!wl){wl=await navigator.wakeLock.request('screen');wl.addEventListener('release',()=>{wl=null})}}catch(e){wl=null;nsOn()}};
 const relWL=()=>{try{wl&&wl.release()}catch(e){}wl=null;nsOff()};
 document.addEventListener('visibilitychange',()=>{if(exporting&&document.visibilityState==='visible')getWL()});
-const seek=t=>new Promise(r=>{v.onseeked=()=>r();v.currentTime=t});
+let abortWait=null;
+const CANCEL=()=>new Error('__cancel');
+const waitVisible=()=>new Promise(r=>{
+  const f=()=>{if(!document.hidden||cancelReq){document.removeEventListener('visibilitychange',f);abortWait=null;r()}};
+  document.addEventListener('visibilitychange',f);abortWait=f;
+});
+const trySeek=(t,ms)=>new Promise(res=>{
+  let done=false;
+  const fin=ok=>{if(done)return;done=true;clearTimeout(tm);v.removeEventListener('seeked',h);abortWait=null;res(ok)};
+  const h=()=>fin(true),tm=setTimeout(()=>fin(false),ms);
+  v.addEventListener('seeked',h);abortWait=()=>fin(false);
+  v.currentTime=t;
+});
+async function seek(t){
+  for(let tries=0;;){
+    if(cancelReq)throw CANCEL();
+    if(document.hidden){
+      $('dtxt').textContent='Paused while the screen is off. Will resume automatically…';
+      await waitVisible();
+      if(cancelReq)throw CANCEL();
+      $('dtxt').textContent='Keying frames and encoding '+$('fmt').value.toUpperCase();
+      tries=0;
+    }
+    if(tries>=2){ // decoder may have been dropped while backgrounded: nudge it
+      await trySeek(Math.max(0,Math.min(v.duration-0.05,t+0.05)),1500);
+      if(cancelReq)throw CANCEL();
+    }
+    const ok=await trySeek(t,2500);
+    if(cancelReq)throw CANCEL();
+    if(ok&&!document.hidden)return;
+    if(!document.hidden)tries++;
+  }
+}
 $('go').onclick=async()=>{
   cancelReq=false;$('cfm').hidden=true;$('xbtn').hidden=false;exporting=true;getWL();$('go').disabled=true;v.pause();$('out').innerHTML='';document.querySelector('#bar i').style.width='0';$('dlg').classList.add('show');$('dtxt').textContent='Keying frames and encoding '+$('fmt').value.toUpperCase();
   const fps=+$('fps').value,w=+$('wd').value,h=Math.round(w*v.videoHeight/v.videoWidth);
@@ -1262,7 +1294,7 @@ $('go').onclick=async()=>{
   try{
     for(let i=0;i<total;i++){
       await seek(Math.min(i/fps,v.duration-0.01));
-      if(cancelReq)throw new Error('__cancel');
+      if(cancelReq)throw CANCEL();
       x.clearRect(0,0,w,h);x.drawImage(v,0,0,w,h);
       const im=x.getImageData(0,0,w,h);keyFrame(im.data);
       if($('fmt').value==='gif')frames.push(im.data);

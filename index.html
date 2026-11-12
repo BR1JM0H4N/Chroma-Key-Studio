@@ -158,6 +158,9 @@
     body[data-bg=grey] { --pvbg: #808080 }
     body[data-bg=hc] { --pvbg: repeating-conic-gradient(#000 0 25%, #fff 0 50%) 0 0/16px 16px }
     
+    #info { display: flex; justify-content: space-between; margin-top: 10px; padding: 0 4px; font: 500 13px/20px Roboto, system-ui, sans-serif; color: var(--onSurfaceVariant, #c5c8bd); font-variant-numeric: tabular-nums }
+    #info[hidden] { display: none }
+    
     #bgs { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap }
     #bgs .hint { margin-right: 4px }
     #bgs button { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--outline); cursor: pointer; padding: 0 }
@@ -885,6 +888,7 @@
           <button class="btn" id="pick" type="button">Select file</button>
         </div>
       </div>
+      <div id="info" hidden><span id="i_fps">–</span><span id="i_size">–</span><span id="i_res">–</span></div>
       <div class="actions">
         <button class="btn tonal" id="change" type="button" hidden>Change file</button>
         <span class="grow"></span>
@@ -1124,7 +1128,27 @@ function draw(){
 }
 let raf;function loop(){if(!exporting)draw();raf=requestAnimationFrame(loop)}
 let srcBase='video';
-const ready=()=>{loaded=true;$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(Math.min(480,v.videoWidth));
+let srcSize=0;
+const fmtSize=b=>b>=1048576?(b/1048576).toFixed(b>=10485760?0:1)+'MB':b>=1024?Math.round(b/1024)+'KB':b+'B';
+const fmtFps=f=>{const r=Math.round(f*100)/100;return r+'fps'};
+function showInfo(){
+  $('info').hidden=false;
+  $('i_size').textContent=fmtSize(srcSize);
+  $('i_res').textContent=v.videoWidth+'x'+v.videoHeight;
+  if(v.frames){$('i_fps').textContent=fmtFps(v.frames.length/v.duration);return}
+  $('i_fps').textContent='…fps';
+  if(!('requestVideoFrameCallback' in vid)){$('i_fps').textContent='–fps';return}
+  let last=null;const d=[];
+  const cb=(n,m)=>{
+    if(v!==vid)return;
+    if(last!==null){const x=m.mediaTime-last;if(x>0.001)d.push(x)}
+    last=m.mediaTime;
+    if(d.length<12)vid.requestVideoFrameCallback(cb);
+    else{d.sort((a,b)=>a-b);$('i_fps').textContent=fmtFps(1/d[d.length>>1])}
+  };
+  vid.requestVideoFrameCallback(cb);
+}
+const ready=()=>{loaded=true;showInfo();$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(Math.min(480,v.videoWidth));
 document.querySelector('.stage').style.aspectRatio=v.videoWidth+' / '+v.videoHeight;
 const wd=$('wd'),vw=v.videoWidth;wd.max=vw;wd.min=Math.min(120,vw);wd.step=1;
 wd.value=Math.min(+wd.value,vw);$('wdo').textContent=wd.value;paint(wd);
@@ -1132,6 +1156,7 @@ v.play().catch(()=>{});setIcon();draw();cancelAnimationFrame(raf);loop()};
 $('file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
   e.target.value='';
+  srcSize=f.size;
   srcBase=f.name.replace(/\.[^.]*$/,'')||'video';
   v.pause();
   if(f.type.startsWith('image/')||/\.(gif|webp)$/i.test(f.name)){

@@ -158,6 +158,10 @@
     body[data-bg=grey] { --pvbg: #808080 }
     body[data-bg=hc] { --pvbg: repeating-conic-gradient(#000 0 25%, #fff 0 50%) 0 0/16px 16px }
     
+    .chk { display: flex; align-items: center; gap: 10px; margin-top: 10px; font: 500 14px/20px Roboto, system-ui, sans-serif; cursor: pointer }
+    .chk input { width: 20px; height: 20px; accent-color: var(--primary) }
+    #fps:disabled { opacity: .4 }
+    
     #info { display: flex; justify-content: space-between; margin-top: 10px; padding: 0 4px; font: 500 13px/20px Roboto, system-ui, sans-serif; color: var(--onSurfaceVariant, #c5c8bd); font-variant-numeric: tabular-nums }
     #info[hidden] { display: none }
     
@@ -959,6 +963,7 @@
         <div class="top"><label for="fps">Frame rate</label><output id="fpso">10</output></div><input type="range" id="fps" min="5"
                                                                                                                                 max="30"
                                                                                                                                 value="10">
+        <label class="chk"><input type="checkbox" id="ofps"> Export at original FPS</label>
       </div>
       <div class="sl">
         <div class="top"><label for="wd">Width (px)</label><output id="wdo">320</output></div><input type="range" id="wd" min="120"
@@ -1128,14 +1133,30 @@ function draw(){
 }
 let raf;function loop(){if(!exporting)draw();raf=requestAnimationFrame(loop)}
 let srcBase='video';
-let srcSize=0;
+let srcSize=0,srcFps=0;
+function syncFps(){
+  const sl=$('fps'),on=$('ofps').checked&&srcFps>0;
+  sl.disabled=on;
+  $('fpso').textContent=on?Math.round(Math.min(30,srcFps)*100)/100:sl.value;
+  paint(sl);
+}
+function applyFps(f){
+  srcFps=f;const sl=$('fps');
+  const mx=f>0?Math.max(1,Math.min(30,Math.floor(f+0.05))):30;
+  sl.max=mx;sl.min=Math.min(5,mx);
+  if(+sl.value>mx)sl.value=mx;
+  syncFps();
+}
+$('ofps').onchange=syncFps;
+const getFps=()=>$('ofps').checked&&srcFps>0?Math.min(30,srcFps):+$('fps').value;
 const fmtSize=b=>b>=1048576?(b/1048576).toFixed(b>=10485760?0:1)+'MB':b>=1024?Math.round(b/1024)+'KB':b+'B';
 const fmtFps=f=>{const r=Math.round(f*100)/100;return r+'fps'};
 function showInfo(){
   $('info').hidden=false;
   $('i_size').textContent=fmtSize(srcSize);
   $('i_res').textContent=v.videoWidth+'x'+v.videoHeight;
-  if(v.frames){$('i_fps').textContent=fmtFps(v.frames.length/v.duration);return}
+  applyFps(0);
+  if(v.frames){const f=v.frames.length/v.duration;applyFps(f);$('i_fps').textContent=fmtFps(f);return}
   $('i_fps').textContent='…fps';
   if(!('requestVideoFrameCallback' in vid)){$('i_fps').textContent='–fps';return}
   let last=null;const d=[];
@@ -1144,7 +1165,7 @@ function showInfo(){
     if(last!==null){const x=m.mediaTime-last;if(x>0.001)d.push(x)}
     last=m.mediaTime;
     if(d.length<12)vid.requestVideoFrameCallback(cb);
-    else{d.sort((a,b)=>a-b);$('i_fps').textContent=fmtFps(1/d[d.length>>1])}
+    else{d.sort((a,b)=>a-b);const f=1/d[d.length>>1];$('i_fps').textContent=fmtFps(f);applyFps(f)}
   };
   vid.requestVideoFrameCallback(cb);
 }
@@ -1368,7 +1389,7 @@ async function seek(t){
 }
 $('go').onclick=async()=>{
   cancelReq=false;$('cfm').hidden=true;$('xbtn').hidden=false;exporting=true;getWL();$('go').disabled=true;v.pause();$('out').innerHTML='';document.querySelector('#bar i').style.width='0';$('dlg').classList.add('show');$('dtxt').textContent='Keying frames and encoding '+$('fmt').value.toUpperCase();
-  const fps=+$('fps').value,w=+$('wd').value,h=Math.round(w*v.videoHeight/v.videoWidth);
+  const fps=getFps(),w=+$('wd').value,h=Math.round(w*v.videoHeight/v.videoWidth);
   const total=Math.max(1,Math.floor(v.duration*fps));
   const c=document.createElement('canvas');c.width=w;c.height=h;
   const x=c.getContext('2d',{willReadFrequently:true});

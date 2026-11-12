@@ -684,6 +684,12 @@
       font-size: 12px
     }
     
+    #cfm { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 12px }
+    #cfm[hidden] { display: none }
+    .cfmrow { display: flex; gap: 8px; width: 100%; justify-content: center }
+    .cfmrow .btn { padding: 0 16px }
+    #xbtn[hidden] { display: none }
+    
     #bar i {
       display: block;
       height: 100%;
@@ -991,6 +997,11 @@
       <div class="hint" id="dtxt">Preparing frames…</div>
       <div id="bar"><i></i></div>
       <div class="row"><span id="dfr">0 / 0</span><span id="dpct">0%</span></div>
+      <button class="iconbtn" id="xbtn" type="button" aria-label="Cancel export"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" /></svg></button>
+      <div id="cfm" hidden>
+        <div class="hint">Stop exporting? Progress will be lost.</div>
+        <div class="cfmrow"><button class="btn tonal" id="cno" type="button">Keep going</button><button class="btn" id="cyes" type="button">Stop</button></div>
+      </div>
     </div>
   </div>
   <button class="btn fab" id="go" type="button" disabled><svg viewBox="0 0 24 24">
@@ -1228,7 +1239,10 @@ function buildWebp(frames,w,h,ms){
 }
 
 /* ---- Export ---- */
-let exporting=false;
+let exporting=false,cancelReq=false;
+$('xbtn').onclick=()=>{$('xbtn').hidden=true;$('cfm').hidden=false};
+$('cno').onclick=()=>{$('cfm').hidden=true;$('xbtn').hidden=false};
+$('cyes').onclick=()=>{cancelReq=true;$('cfm').hidden=true;$('dtxt').textContent='Stopping…'};
 let wl=null;
 let nsv=null;
 const nsOn=()=>{try{if(!nsv){nsv=document.createElement('video');nsv.muted=true;nsv.loop=true;nsv.setAttribute('playsinline','');nsv.setAttribute('muted','');nsv.style.cssText='position:fixed;width:1px;height:1px;opacity:.01;pointer-events:none';
@@ -1239,7 +1253,7 @@ const relWL=()=>{try{wl&&wl.release()}catch(e){}wl=null;nsOff()};
 document.addEventListener('visibilitychange',()=>{if(exporting&&document.visibilityState==='visible')getWL()});
 const seek=t=>new Promise(r=>{v.onseeked=()=>r();v.currentTime=t});
 $('go').onclick=async()=>{
-  exporting=true;getWL();$('go').disabled=true;v.pause();$('out').innerHTML='';document.querySelector('#bar i').style.width='0';$('dlg').classList.add('show');$('dtxt').textContent='Keying frames and encoding '+$('fmt').value.toUpperCase();
+  cancelReq=false;$('cfm').hidden=true;$('xbtn').hidden=false;exporting=true;getWL();$('go').disabled=true;v.pause();$('out').innerHTML='';document.querySelector('#bar i').style.width='0';$('dlg').classList.add('show');$('dtxt').textContent='Keying frames and encoding '+$('fmt').value.toUpperCase();
   const fps=+$('fps').value,w=+$('wd').value,h=Math.round(w*v.videoHeight/v.videoWidth);
   const total=Math.max(1,Math.floor(v.duration*fps));
   const c=document.createElement('canvas');c.width=w;c.height=h;
@@ -1248,6 +1262,7 @@ $('go').onclick=async()=>{
   try{
     for(let i=0;i<total;i++){
       await seek(Math.min(i/fps,v.duration-0.01));
+      if(cancelReq)throw new Error('__cancel');
       x.clearRect(0,0,w,h);x.drawImage(v,0,0,w,h);
       const im=x.getImageData(0,0,w,h);keyFrame(im.data);
       if($('fmt').value==='gif')frames.push(im.data);
@@ -1267,18 +1282,20 @@ $('go').onclick=async()=>{
       $('dtxt').textContent='Generating optimized palette…';await new Promise(r=>setTimeout(r,30));
       P=genPalette(frames);const mode=$('dth').value;
       for(let i=0;i<frames.length;i++){
+        if(cancelReq)throw new Error('__cancel');
         frames[i]=mapFrame(frames[i],w,h,P,mode);
         $('dtxt').textContent='Applying palette '+(i+1)+' / '+frames.length;
         if(i%2===0)await new Promise(r=>setTimeout(r));
       }
       $('dtxt').textContent='Finalizing file…';await new Promise(r=>setTimeout(r,30));
     }
+    if(cancelReq)throw new Error('__cancel');
     const bin=isGif?buildGif(frames,w,h,Math.round(100/fps),P.pal):buildWebp(frames,w,h,Math.round(1000/fps));
     const url=URL.createObjectURL(new Blob([bin],{type:isGif?'image/gif':'image/webp'}));
     const ext=isGif?'gif':'webp';
     $('out').innerHTML='<div class="res"><img src="'+url+'" alt="Result"></div><a class="btn tonal" href="'+url+'" download="transparent.'+ext+'"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>Download '+ext.toUpperCase()+' · '+(bin.length/1024|0)+' KB</a>';$('out').scrollIntoView({behavior:'smooth',block:'nearest'});
-  }catch(e){$('out').innerHTML='<div class="err"></div>';$('out').firstChild.textContent='Export failed: '+e.message}
-  exporting=false;relWL();$('dlg').classList.remove('show');$('go').disabled=false;v.play().catch(()=>{});
+  }catch(e){if(e.message==='__cancel')$('out').innerHTML='';else{$('out').innerHTML='<div class="err"></div>';$('out').firstChild.textContent='Export failed: '+e.message}}
+  exporting=false;cancelReq=false;$('cfm').hidden=true;relWL();$('dlg').classList.remove('show');$('go').disabled=false;v.play().catch(()=>{});
 };
   </script>
 </body>

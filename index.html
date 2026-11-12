@@ -475,6 +475,8 @@
       background-clip: padding-box
     }
     
+    #rfbox[hidden] { display: none }
+    
     .sr {
       display: flex;
       align-items: center;
@@ -939,6 +941,23 @@
                                                                                                                                   id="spill"
                                                                                                                                   checked><span></span></label>
       </div>
+      <div class="sr">
+        <div class="l"><b>Refine edges</b><span class="hint">Optional cleanup: specks, shrink/expand, smooth, feather</span></div><label class="switch"><input type="checkbox" id="rf"><span></span></label>
+      </div>
+      <div id="rfbox" hidden>
+        <div class="sl">
+          <div class="top"><label for="rfs">Remove specks (px)</label><output id="rfso">0</output></div><input type="range" id="rfs" min="0" max="200" value="0">
+        </div>
+        <div class="sl">
+          <div class="top"><label for="rfx">Shrink / Expand (px)</label><output id="rfxo">0</output></div><input type="range" id="rfx" min="-4" max="4" step="0.25" value="0">
+        </div>
+        <div class="sl">
+          <div class="top"><label for="rfm">Smooth</label><output id="rfmo">0</output></div><input type="range" id="rfm" min="0" max="10" value="0">
+        </div>
+        <div class="sl">
+          <div class="top"><label for="rff">Feather (px)</label><output id="rffo">0</output></div><input type="range" id="rff" min="0" max="10" value="0">
+        </div>
+      </div>
     </section>
     
     <section class="card">
@@ -1065,7 +1084,7 @@ async function decodeAnim(f){
 const cv=$('cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
 let keys=[[0,255,0]],keyDefault=true,loaded=false;
 const paint=el=>el.style.setProperty('--p',((el.value-el.min)/(el.max-el.min)*100)+'%');
-['sim','smo','fps','wd','q'].forEach(k=>{paint($(k));$(k).oninput=()=>{$(k+'o').textContent=$(k).value;paint($(k));draw()}});
+['sim','smo','fps','wd','q','rfs','rfx','rfm','rff'].forEach(k=>{paint($(k));$(k).oninput=()=>{$(k+'o').textContent=$(k).value;paint($(k));draw()}});
 const cv2=$('cv2'),ctx2=cv2.getContext('2d');let dockOn=false;
 document.querySelectorAll('#bgs button').forEach(b=>b.onclick=()=>{
   document.body.dataset.bg=b.dataset.b;
@@ -1090,12 +1109,83 @@ document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{
 const setIcon=()=>{const h=v.paused?'<path d="M8 5v14l11-7z"/>':'<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';$('ppi').innerHTML=h;$('ppi2').innerHTML=h};
 vid.addEventListener('play',setIcon);vid.addEventListener('pause',setIcon);
 $('spill').onchange=draw;
+$('rf').onchange=()=>{$('rfbox').hidden=!$('rf').checked;draw()};
 
 function cbcr(r,g,b){return[-0.169*r-0.331*g+0.5*b,0.5*r-0.419*g-0.081*b]}
-function keyFrame(d){
+// ---- Optional edge refinement (alpha-only post-process; off unless "Refine edges" is on) ----
+let _rb={n:0};
+function rbufs(n){if(_rb.n!==n)_rb={n,A:new Float32Array(n),T:new Float32Array(n),S:new Float32Array(n),P:new Float32Array(n),V:new Uint8Array(n),ST:new Int32Array(n),C:new Uint8Array(n)};return _rb}
+function boxBlur(A,T,w,h,r){ // separable box blur, edge-clamped; result back in A
+  if(r<1)return;const win=2*r+1;
+  for(let y=0;y<h;y++){
+    const o=y*w;let s=0;
+    for(let x=-r;x<=r;x++)s+=A[o+(x<0?0:x>=w?w-1:x)];
+    for(let x=0;x<w;x++){T[o+x]=s/win;s+=A[o+Math.min(w-1,x+r+1)]-A[o+Math.max(0,x-r)]}
+  }
+  for(let x=0;x<w;x++){
+    let s=0;
+    for(let y=-r;y<=r;y++)s+=T[(y<0?0:y>=h?h-1:y)*w+x];
+    for(let y=0;y<h;y++){A[y*w+x]=s/win;s+=T[Math.min(h-1,y+r+1)*w+x]-T[Math.max(0,y-r)*w+x]}
+  }
+}
+function morph(A,T,S,w,h,n,grow){ // grayscale erode/dilate, n px; alternates square/cross for a rounder shape
+  const f=grow?Math.max:Math.min;
+  for(let it=0;it<n;it++){
+    if(it&1){
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+        const j=y*w+x;let m=A[j];
+        if(x>0)m=f(m,A[j-1]);if(x<w-1)m=f(m,A[j+1]);if(y>0)m=f(m,A[j-w]);if(y<h-1)m=f(m,A[j+w]);
+        T[j]=m;
+      }
+    }else{
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+        const j=y*w+x;let m=A[j];
+        if(x>0)m=f(m,A[j-1]);if(x<w-1)m=f(m,A[j+1]);S[j]=m;
+      }
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+        const j=y*w+x;let m=S[j];
+        if(y>0)m=f(m,S[j-w]);if(y<h-1)m=f(m,S[j+w]);T[j]=m;
+      }
+    }
+    A.set(T);
+  }
+}
+function despeck(A,w,h,minSize,V,ST){ // delete visible blobs smaller than minSize px
+  V.fill(0);const n=w*h;
+  for(let s=0;s<n;s++){
+    if(V[s]||A[s]<26)continue;
+    let head=0,tail=0;ST[tail++]=s;V[s]=1;
+    while(head<tail){
+      const j=ST[head++],x=j%w;
+      if(x>0&&!V[j-1]&&A[j-1]>=26){V[j-1]=1;ST[tail++]=j-1}
+      if(x<w-1&&!V[j+1]&&A[j+1]>=26){V[j+1]=1;ST[tail++]=j+1}
+      if(j>=w&&!V[j-w]&&A[j-w]>=26){V[j-w]=1;ST[tail++]=j-w}
+      if(j<n-w&&!V[j+w]&&A[j+w]>=26){V[j+w]=1;ST[tail++]=j+w}
+    }
+    if(tail<minSize)for(let k=0;k<tail;k++)A[ST[k]]=0;
+  }
+}
+function refineAlpha(A,B,w,h){
+  const spk=+$('rfs').value,sx=+$('rfx').value,sm=+$('rfm').value,fe=+$('rff').value;
+  if(spk>0)despeck(A,w,h,spk,B.V,B.ST);
+  if(sx!==0){ // whole pixels, then a fractional last step blended in for sub-pixel control
+    const ab=Math.abs(sx),whole=Math.floor(ab),fr=ab-whole,grow=sx>0;
+    if(whole>0)morph(A,B.T,B.S,w,h,whole,grow);
+    if(fr>0){B.P.set(A);morph(A,B.T,B.S,w,h,1,grow);for(let j=0;j<A.length;j++)A[j]=B.P[j]+(A[j]-B.P[j])*fr}
+  }
+  if(sm>0){ // blur then re-sharpen around 50%: rounds off jagged edges
+    boxBlur(A,B.T,w,h,Math.ceil(sm/2));boxBlur(A,B.T,w,h,Math.ceil(sm/2));
+    const k=1.5+sm*0.35;
+    for(let j=0;j<A.length;j++){const a=((A[j]/255-.5)*k+.5)*255;A[j]=a<0?0:a>255?255:a}
+  }
+  if(fe>0){boxBlur(A,B.T,w,h,fe);boxBlur(A,B.T,w,h,fe)}
+}
+function keyFrame(d,w,h){
   const sim=$('sim').value*1.5,smo=$('smo').value*1.5,sp=$('spill').checked;
   const K=keys.map(k=>{const [c,q]=cbcr(...k);return{c,q,ch:k[1]>=k[0]&&k[1]>=k[2]?1:(k[2]>k[0]?2:0)}});
   const n=K.length;if(!n)return;
+  const rf=$('rf').checked&&w>0&&h>0&&d.length===w*h*4;
+  const B=rf?rbufs(w*h):null;
   for(let i=0;i<d.length;i+=4){
     const r=d[i],g=d[i+1],b=d[i+2];
     const [c,q]=cbcr(r,g,b);
@@ -1103,10 +1193,22 @@ function keyFrame(d){
     for(let j=0;j<n;j++){const dd=Math.hypot(c-K[j].c,q-K[j].q);if(dd<best){best=dd;bi=j}}
     let a=(best-sim)/smo;a=a<0?0:a>1?1:a;
     d[i+3]=a*255;
-    if(sp&&a>0&&a<1){
+    if(rf){B.A[i>>2]=a*255;B.C[i>>2]=K[bi].ch}
+    else if(sp&&a>0&&a<1){
       const ch=K[bi].ch;
       const o=ch===1?Math.max(r,b):ch===2?Math.max(r,g):Math.max(g,b);
       if(d[i+ch]>o)d[i+ch]=o;
+    }
+  }
+  if(rf){
+    refineAlpha(B.A,B,w,h);
+    for(let i=0,j=0;i<d.length;i+=4,j++){
+      const a=B.A[j];d[i+3]=a;
+      if(sp&&a>0&&a<255){ // spill cleanup on the refined edge (incl. pixels revealed by Expand)
+        const ch=B.C[j],r=d[i],g=d[i+1],b=d[i+2];
+        const o=ch===1?Math.max(r,b):ch===2?Math.max(r,g):Math.max(g,b);
+        if(d[i+ch]>o)d[i+ch]=o;
+      }
     }
   }
 }
@@ -1128,7 +1230,7 @@ function draw(){
   if(!loaded)return;
   ctx.clearRect(0,0,cv.width,cv.height);
   ctx.drawImage(v.el||v,0,0,cv.width,cv.height);
-  const im=ctx.getImageData(0,0,cv.width,cv.height);keyFrame(im.data);ctx.putImageData(im,0,0);
+  const im=ctx.getImageData(0,0,cv.width,cv.height);keyFrame(im.data,cv.width,cv.height);ctx.putImageData(im,0,0);
   if(dockOn){if(cv2.width!==cv.width||cv2.height!==cv.height){cv2.width=cv.width;cv2.height=cv.height}ctx2.clearRect(0,0,cv2.width,cv2.height);ctx2.drawImage(cv,0,0)}
 }
 let raf;function loop(){if(!exporting)draw();raf=requestAnimationFrame(loop)}
@@ -1399,7 +1501,7 @@ $('go').onclick=async()=>{
       await seek(Math.min(i/fps,v.duration-0.01));
       if(cancelReq)throw CANCEL();
       x.clearRect(0,0,w,h);x.drawImage(v.el||v,0,0,w,h);
-      const im=x.getImageData(0,0,w,h);keyFrame(im.data);
+      const im=x.getImageData(0,0,w,h);keyFrame(im.data,w,h);
       if($('fmt').value==='gif')frames.push(im.data);
       else{
         x.putImageData(im,0,0);

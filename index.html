@@ -475,7 +475,7 @@
       background-clip: padding-box
     }
     
-    #rfbox[hidden], #acbox[hidden] { display: none }
+    #rfbox[hidden], #acbox[hidden], #nsrow[hidden] { display: none }
     
     #acbox .hint { display: block; padding: 0 8px 8px }
     
@@ -998,6 +998,10 @@
         <div class="top"><label for="q">WebP quality</label><output id="qo">85</output></div><input type="range" id="q" min="1" max="100"
                                                                                                                                 value="85">
       </div>
+      <div class="sl" id="nsrow" hidden>
+        <label class="chk"><input type="checkbox" id="nosemi"> Disable semi transparency</label>
+        <span class="hint">Same hard cut-off as the GIF encoder (alpha below 50% becomes clear, the rest fully opaque)</span>
+      </div>
       <div class="sl">
         <div class="top"><label for="fps">Frame rate</label><output id="fpso">10</output></div><input type="range" id="fps" min="5"
                                                                                                                                 max="30"
@@ -1125,8 +1129,10 @@ $('pick').onclick=pick;$('change').onclick=pick;
 document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{
   $('fmt').value=b.dataset.v;
   document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));
-  $('qrow').classList.toggle('dim',b.dataset.v==='gif');$('drow').hidden=b.dataset.v!=='gif';
+  $('qrow').classList.toggle('dim',b.dataset.v==='gif');$('drow').hidden=b.dataset.v!=='gif';$('nsrow').hidden=b.dataset.v!=='webp';
+  draw();
 });
+$('nosemi').onchange=draw;
 const setIcon=()=>{const h=v.paused?'<path d="M8 5v14l11-7z"/>':'<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';$('ppi').innerHTML=h;$('ppi2').innerHTML=h};
 vid.addEventListener('play',setIcon);vid.addEventListener('pause',setIcon);
 $('spill').onchange=draw;
@@ -1297,6 +1303,9 @@ function keyFrame(d,w,h){
         if(d[i+ch]>o)d[i+ch]=o;
       }
     }
+  }
+  if($('fmt').value==='webp'&&$('nosemi').checked){ // same on/off alpha rule as the GIF encoder
+    for(let i=3;i<d.length;i+=4)d[i]=d[i]<128?0:255;
   }
 }
 const hex=k=>'#'+k.map(n=>n.toString(16).padStart(2,'0')).join('');

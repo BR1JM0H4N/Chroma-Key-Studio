@@ -475,7 +475,11 @@
       background-clip: padding-box
     }
     
-    #rfbox[hidden] { display: none }
+    #rfbox[hidden], #acbox[hidden] { display: none }
+    
+    #acbox .hint { display: block; padding: 0 8px 8px }
+    
+    #acbox .acrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 8px 12px }
     
     .sr {
       display: flex;
@@ -958,6 +962,22 @@
           <div class="top"><label for="rff">Feather (px)</label><output id="rffo">0</output></div><input type="range" id="rff" min="0" max="10" value="0">
         </div>
       </div>
+      <div class="sr">
+        <div class="l"><b>Advanced cutout</b><span class="hint">Remove only background connected to a seed, so same-colored areas inside the subject (like eye whites) stay</span></div><label class="switch"><input type="checkbox" id="ac"><span></span></label>
+      </div>
+      <div id="acbox" hidden>
+        <span class="hint">Tap the background on the preview to place seeds (each tap also adds its color as a key color). Only background reachable from a seed is removed.</span>
+        <div class="acrow"><b id="acn">Seeds: 0</b><button class="btn tonal" id="acc" type="button">Clear seeds</button></div>
+        <div class="sr">
+          <div class="l"><b>Use frame edges as seeds</b><span class="hint">Background touching the frame border is removed automatically</span></div><label class="switch"><input type="checkbox" id="acb" checked><span></span></label>
+        </div>
+        <div class="sl">
+          <div class="top"><label for="acl">Leak guard (px)</label><output id="aclo">0</output></div><input type="range" id="acl" min="0" max="4" value="0">
+        </div>
+        <div class="sl">
+          <div class="top"><label for="acg">Also remove enclosed gaps larger than (% of frame)</label><output id="acgo">0</output></div><input type="range" id="acg" min="0" max="10" step="0.1" value="0">
+        </div>
+      </div>
     </section>
     
     <section class="card">
@@ -1083,8 +1103,9 @@ async function decodeAnim(f){
 }
 const cv=$('cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
 let keys=[[0,255,0]],keyDefault=true,loaded=false;
+let seeds=[];const updSeeds=()=>{$('acn').textContent='Seeds: '+seeds.length};
 const paint=el=>el.style.setProperty('--p',((el.value-el.min)/(el.max-el.min)*100)+'%');
-['sim','smo','fps','wd','q','rfs','rfx','rfm','rff'].forEach(k=>{paint($(k));$(k).oninput=()=>{$(k+'o').textContent=$(k).value;paint($(k));draw()}});
+['sim','smo','fps','wd','q','rfs','rfx','rfm','rff','acl','acg'].forEach(k=>{paint($(k));$(k).oninput=()=>{$(k+'o').textContent=$(k).value;paint($(k));draw()}});
 const cv2=$('cv2'),ctx2=cv2.getContext('2d');let dockOn=false;
 document.querySelectorAll('#bgs button').forEach(b=>b.onclick=()=>{
   document.body.dataset.bg=b.dataset.b;
@@ -1110,11 +1131,14 @@ const setIcon=()=>{const h=v.paused?'<path d="M8 5v14l11-7z"/>':'<path d="M6 19h
 vid.addEventListener('play',setIcon);vid.addEventListener('pause',setIcon);
 $('spill').onchange=draw;
 $('rf').onchange=()=>{$('rfbox').hidden=!$('rf').checked;draw()};
+$('ac').onchange=()=>{$('acbox').hidden=!$('ac').checked;draw()};
+$('acb').onchange=draw;
+$('acc').onclick=()=>{seeds=[];updSeeds();draw()};
 
 function cbcr(r,g,b){return[-0.169*r-0.331*g+0.5*b,0.5*r-0.419*g-0.081*b]}
 // ---- Optional edge refinement (alpha-only post-process; off unless "Refine edges" is on) ----
 let _rb={n:0};
-function rbufs(n){if(_rb.n!==n)_rb={n,A:new Float32Array(n),T:new Float32Array(n),S:new Float32Array(n),P:new Float32Array(n),V:new Uint8Array(n),ST:new Int32Array(n),C:new Uint8Array(n)};return _rb}
+function rbufs(n){if(_rb.n!==n)_rb={n,A:new Float32Array(n),T:new Float32Array(n),S:new Float32Array(n),P:new Float32Array(n),V:new Uint8Array(n),ST:new Int32Array(n),C:new Uint8Array(n),M:new Uint8Array(n),F:new Uint8Array(n),R:new Uint8Array(n),W:new Uint8Array(n)};return _rb}
 function boxBlur(A,T,w,h,r){ // separable box blur, edge-clamped; result back in A
   if(r<1)return;const win=2*r+1;
   for(let y=0;y<h;y++){
@@ -1180,12 +1204,74 @@ function refineAlpha(A,B,w,h){
   }
   if(fe>0){boxBlur(A,B.T,w,h,fe);boxBlur(A,B.T,w,h,fe)}
 }
+function advCutout(A,w,h,B){
+  const n=w*h,M=B.M,F=B.F,R=B.R,W=B.W,Q=B.ST;
+  let g=+$('acl').value;if(g>0)g=Math.max(1,Math.round(g*w/480));
+  const big=+$('acg').value/100*n;
+  for(let j=0;j<n;j++)M[j]=A[j]<128?1:0; // 1 = background-colored
+  // leak guard: keep the fill away from the subject so small gaps in its outline can't be crossed
+  if(g>0){
+    for(let j=0;j<n;j++)R[j]=M[j]?0:1;
+    for(let it=0;it<g;it++){
+      W.set(R);
+      for(let y=0,j=0;y<h;y++)for(let x=0;x<w;x++,j++){
+        if(!R[j]&&((x>0&&W[j-1])||(x<w-1&&W[j+1])||(y>0&&W[j-w])||(y<h-1&&W[j+w])))R[j]=1;
+      }
+    }
+    for(let j=0;j<n;j++)F[j]=M[j]&&!R[j]?1:0;
+  }else F.set(M);
+  // flood fill from seeds (and optionally the frame edges)
+  R.fill(0);let qt=0,qh=0;
+  const push=j=>{if(F[j]&&!R[j]){R[j]=1;Q[qt++]=j}};
+  if($('acb').checked){
+    for(let x=0;x<w;x++){push(x);push((h-1)*w+x)}
+    for(let y=0;y<h;y++){push(y*w);push(y*w+w-1)}
+  }
+  const rr=2+g;
+  for(const s of seeds){
+    const sx=Math.round(s.nx*(w-1)),sy=Math.round(s.ny*(h-1));let bj=-1,bd=1e9;
+    for(let dy=-rr;dy<=rr;dy++)for(let dx=-rr;dx<=rr;dx++){
+      const x=sx+dx,y=sy+dy;if(x<0||y<0||x>=w||y>=h)continue;
+      const j=y*w+x;if(F[j]){const d=dx*dx+dy*dy;if(d<bd){bd=d;bj=j}}
+    }
+    if(bj>=0)push(bj);
+  }
+  while(qh<qt){
+    const j=Q[qh++],x=j%w;
+    if(x>0)push(j-1);if(x<w-1)push(j+1);if(j>=w)push(j-w);if(j<n-w)push(j+w);
+  }
+  // grow back toward the subject by g px (undoes the leak-guard gap) without leaving the background mask
+  for(let it=0;it<g;it++){
+    W.set(R);
+    for(let y=0,j=0;y<h;y++)for(let x=0;x<w;x++,j++){
+      if(!R[j]&&M[j]&&((x>0&&W[j-1])||(x<w-1&&W[j+1])||(y>0&&W[j-w])||(y<h-1&&W[j+w])))R[j]=1;
+    }
+  }
+  // background-colored pixels the fill never reached are enclosed by the subject: restore them
+  if(big>0){ // ...unless the enclosed region is large (a gap between arm and body), then it stays removed
+    W.fill(0);
+    for(let s=0;s<n;s++){
+      if(!M[s]||R[s]||W[s])continue;
+      let h2=0,t2=0;Q[t2++]=s;W[s]=1;
+      while(h2<t2){
+        const j=Q[h2++],x=j%w;
+        if(x>0&&M[j-1]&&!R[j-1]&&!W[j-1]){W[j-1]=1;Q[t2++]=j-1}
+        if(x<w-1&&M[j+1]&&!R[j+1]&&!W[j+1]){W[j+1]=1;Q[t2++]=j+1}
+        if(j>=w&&M[j-w]&&!R[j-w]&&!W[j-w]){W[j-w]=1;Q[t2++]=j-w}
+        if(j<n-w&&M[j+w]&&!R[j+w]&&!W[j+w]){W[j+w]=1;Q[t2++]=j+w}
+      }
+      if(t2<big)for(let k=0;k<t2;k++)A[Q[k]]=255;
+    }
+  }else{
+    for(let j=0;j<n;j++)if(M[j]&&!R[j])A[j]=255;
+  }
+}
 function keyFrame(d,w,h){
   const sim=$('sim').value*1.5,smo=$('smo').value*1.5,sp=$('spill').checked;
   const K=keys.map(k=>{const [c,q]=cbcr(...k);return{c,q,ch:k[1]>=k[0]&&k[1]>=k[2]?1:(k[2]>k[0]?2:0)}});
   const n=K.length;if(!n)return;
-  const rf=$('rf').checked&&w>0&&h>0&&d.length===w*h*4;
-  const B=rf?rbufs(w*h):null;
+  const ok=w>0&&h>0&&d.length===w*h*4,rf=$('rf').checked&&ok,ac=$('ac').checked&&ok,use=rf||ac;
+  const B=use?rbufs(w*h):null;
   for(let i=0;i<d.length;i+=4){
     const r=d[i],g=d[i+1],b=d[i+2];
     const [c,q]=cbcr(r,g,b);
@@ -1193,15 +1279,16 @@ function keyFrame(d,w,h){
     for(let j=0;j<n;j++){const dd=Math.hypot(c-K[j].c,q-K[j].q);if(dd<best){best=dd;bi=j}}
     let a=(best-sim)/smo;a=a<0?0:a>1?1:a;
     d[i+3]=a*255;
-    if(rf){B.A[i>>2]=a*255;B.C[i>>2]=K[bi].ch}
+    if(use){B.A[i>>2]=a*255;B.C[i>>2]=K[bi].ch}
     else if(sp&&a>0&&a<1){
       const ch=K[bi].ch;
       const o=ch===1?Math.max(r,b):ch===2?Math.max(r,g):Math.max(g,b);
       if(d[i+ch]>o)d[i+ch]=o;
     }
   }
-  if(rf){
-    refineAlpha(B.A,B,w,h);
+  if(use){
+    if(ac)advCutout(B.A,w,h,B);
+    if(rf)refineAlpha(B.A,B,w,h);
     for(let i=0,j=0;i<d.length;i+=4,j++){
       const a=B.A[j];d[i+3]=a;
       if(sp&&a>0&&a<255){ // spill cleanup on the refined edge (incl. pixels revealed by Expand)
@@ -1231,6 +1318,7 @@ function draw(){
   ctx.clearRect(0,0,cv.width,cv.height);
   ctx.drawImage(v.el||v,0,0,cv.width,cv.height);
   const im=ctx.getImageData(0,0,cv.width,cv.height);keyFrame(im.data,cv.width,cv.height);ctx.putImageData(im,0,0);
+  if($('ac').checked&&seeds.length){const rad=Math.max(4,cv.width/110);for(const s of seeds){const px=s.nx*(cv.width-1),py=s.ny*(cv.height-1);ctx.beginPath();ctx.arc(px,py,rad,0,6.2832);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=Math.max(1.5,rad/3);ctx.strokeStyle='#e91e63';ctx.stroke()}}
   if(dockOn){if(cv2.width!==cv.width||cv2.height!==cv.height){cv2.width=cv.width;cv2.height=cv.height}ctx2.clearRect(0,0,cv2.width,cv2.height);ctx2.drawImage(cv,0,0)}
 }
 let raf;function loop(){if(!exporting)draw();raf=requestAnimationFrame(loop)}
@@ -1271,7 +1359,7 @@ function showInfo(){
   };
   vid.requestVideoFrameCallback(cb);
 }
-const ready=()=>{loaded=true;showInfo();$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(Math.min(480,v.videoWidth));
+const ready=()=>{seeds=[];updSeeds();loaded=true;showInfo();$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(Math.min(480,v.videoWidth));
 document.querySelector('.stage').style.aspectRatio=v.videoWidth+' / '+v.videoHeight;
 const wd=$('wd'),vw=v.videoWidth;wd.max=vw;wd.min=Math.min(120,vw);wd.step=1;
 wd.value=Math.min(+wd.value,vw);$('wdo').textContent=wd.value;paint(wd);
@@ -1304,6 +1392,7 @@ cv.onclick=e=>{
   const x=Math.floor((e.clientX-r.left)*cv.width/r.width),y=Math.floor((e.clientY-r.top)*cv.height/r.height);
   const p=c.getImageData(x,y,1,1).data;const nk=[p[0],p[1],p[2]];
   if(keyDefault){keys=[];keyDefault=false}
+  if($('ac').checked){if(seeds.length>=12)seeds.shift();seeds.push({nx:x/Math.max(1,cv.width-1),ny:y/Math.max(1,cv.height-1)});updSeeds()}
   if(!keys.some(k=>Math.hypot(k[0]-nk[0],k[1]-nk[1],k[2]-nk[2])<12)){
     if(keys.length>=8)keys.shift();
     keys.push(nk);

@@ -907,6 +907,9 @@
         <button type="button" data-b="grey" aria-label="Grey"></button>
         <button type="button" data-b="hc" aria-label="High contrast checkerboard"></button>
       </div>
+      <div class="sr">
+        <div class="l"><b>Power saver</b><span class="hint">Lighter live preview (lower resolution, up to 20 fps) and auto-pause after 1 minute idle. Exports stay full quality.</span></div><label class="switch"><input type="checkbox" id="ps" checked><span></span></label>
+      </div>
       <div class="keyrow">
         <div class="t"><b id="kc">Key colors: 1</b><span class="hint">Tap the preview to add each color to
             remove (up to 8). Tap a chip to delete it.</span>
@@ -1297,11 +1300,13 @@ function keyFrame(d,w,h){
   const n=K.length;if(!n)return;const K0=keys;
   const ok=w>0&&h>0&&d.length===w*h*4,rf=$('rf').checked&&ok,ac=$('ac').checked&&ok,use=rf||ac;
   const B=use?rbufs(w*h):null;
+  const Kc=new Float64Array(n),Kq=new Float64Array(n);for(let j=0;j<n;j++){Kc[j]=K[j].c;Kq[j]=K[j].q}
   for(let i=0;i<d.length;i+=4){
     const r=d[i],g=d[i+1],b=d[i+2];
-    const [c,q]=cbcr(r,g,b);
-    let best=1e9,bi=0;
-    for(let j=0;j<n;j++){const dd=Math.hypot(c-K[j].c,q-K[j].q);if(dd<best){best=dd;bi=j}}
+    const c=-0.169*r-0.331*g+0.5*b,q=0.5*r-0.419*g-0.081*b;
+    let best2=1e18,bi=0;
+    for(let j=0;j<n;j++){const x=c-Kc[j],y=q-Kq[j],dd=x*x+y*y;if(dd<best2){best2=dd;bi=j}}
+    const best=Math.sqrt(best2);
     let a=(best-sim)/smo;a=a<0?0:a>1?1:a;
     d[i+3]=a*255;
     if(use){B.A[i>>2]=a*255;B.C[i>>2]=K[bi].ch}
@@ -1347,8 +1352,45 @@ function draw(){
   ctx.drawImage(v.el||v,0,0,cv.width,cv.height);
   const im=ctx.getImageData(0,0,cv.width,cv.height);keyFrame(im.data,cv.width,cv.height);ctx.putImageData(im,0,0);
   if($('ac').checked&&seeds.length){const rad=Math.max(4,cv.width/110);for(const s of seeds){const px=s.nx*(cv.width-1),py=s.ny*(cv.height-1);ctx.beginPath();ctx.arc(px,py,rad,0,6.2832);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=Math.max(1.5,rad/3);ctx.strokeStyle='#e91e63';ctx.stroke()}}
+  dirty=false;
 }
-let raf;function loop(){if(!exporting)draw();raf=requestAnimationFrame(loop)}
+/* ---- power saving: redraw only when something changed ---- */
+const PSKEY='cks_powersaver';
+let psOn=true;try{psOn=localStorage.getItem(PSKEY)!=='0'}catch(e){}
+$('ps').checked=psOn;
+const previewW=()=>Math.min(psOn?320:480,v.videoWidth);
+let dirty=true,lastDraw=0,lastFrameKey=-1,vidFrame=true,lastActive=performance.now(),wasPlaying=false;
+const markDirty=()=>{dirty=true;lastActive=performance.now()};
+['input','change','click','pointerdown','keydown','touchstart'].forEach(t=>document.addEventListener(t,markDirty,{passive:true,capture:true}));
+addEventListener('scroll',()=>{lastActive=performance.now()},{passive:true});
+vid.addEventListener('seeked',markDirty);
+const hasVFC='requestVideoFrameCallback' in vid;
+(function vfc(){if(hasVFC)vid.requestVideoFrameCallback(()=>{vidFrame=true;vfc()})})();
+$('ps').onchange=()=>{
+  psOn=$('ps').checked;try{localStorage.setItem(PSKEY,psOn?'1':'0')}catch(e){}
+  if(loaded)fit(previewW());
+  markDirty();draw();
+};
+document.addEventListener('visibilitychange',()=>{ // never keep playing in the background
+  if(exporting)return;
+  if(document.hidden){wasPlaying=!v.paused;if(wasPlaying)v.pause()}
+  else{if(wasPlaying)v.play().catch(()=>{});wasPlaying=false;markDirty()}
+});
+let raf;function loop(t){
+  raf=requestAnimationFrame(loop);
+  if(exporting||!loaded||document.hidden)return;
+  t=t||performance.now();
+  let need=dirty;
+  if(!v.paused){
+    if(v===vid&&hasVFC)need=need||vidFrame;           // video: only when a new frame arrives
+    else if(v.frames){v.el;if(v._i!==lastFrameKey){lastFrameKey=v._i;need=true}} // GIF/WebP: only when the frame index changes
+    else need=true;
+  }
+  if(!need)return;
+  if(psOn&&t-lastDraw<48)return;                         // ~20 fps cap in power saver
+  lastDraw=t;vidFrame=false;draw();
+  if(psOn&&!v.paused&&performance.now()-lastActive>60000)v.pause(); // idle auto-pause
+}
 let srcBase='video';
 let srcSize=0,srcFps=0;
 function syncFps(){
@@ -1386,7 +1428,7 @@ function showInfo(){
   };
   vid.requestVideoFrameCallback(cb);
 }
-const ready=()=>{seeds=[];updSeeds();loaded=true;showInfo();$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(Math.min(480,v.videoWidth));
+const ready=()=>{seeds=[];updSeeds();loaded=true;showInfo();$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(previewW());lastFrameKey=-1;dirty=true;lastActive=performance.now();
 document.querySelector('.stage').style.aspectRatio=v.videoWidth+' / '+v.videoHeight;
 const wd=$('wd'),vw=v.videoWidth;wd.max=vw;wd.min=Math.min(120,vw);wd.step=1;
 wd.value=Math.min(+wd.value,vw);$('wdo').textContent=wd.value;paint(wd);

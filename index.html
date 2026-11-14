@@ -864,6 +864,33 @@
       /* For Safari */
       z-index: 9;
     }
+
+    /* ---- frame touch-up ---- */
+    #frcard[hidden]{display:none}
+    .frnav{display:flex;align-items:center;gap:8px;padding:0 8px}
+    .frnav .grow{flex:1}
+    #frmk{position:relative;height:10px;margin:-6px 15px 4px}
+    #frmk i{position:absolute;top:0;width:4px;height:10px;margin-left:-2px;border-radius:2px;background:var(--tertiary)}
+    #frmk i.cur{background:var(--error)}
+    #frstat{margin:8px 8px;padding:8px 12px;border-radius:12px;background:var(--surfaceContainerHigh);font:500 13px/18px Roboto,system-ui,sans-serif;color:var(--onSurfaceVariant)}
+    #frstat.fixed{background:var(--tertiaryContainer);color:var(--onTertiaryContainer)}
+    #frstat.edit{background:var(--primaryContainer);color:var(--onPrimaryContainer)}
+    #frlist{display:flex;flex-wrap:wrap;gap:6px;margin:4px 8px 8px}
+    #frlist:empty::after{content:"No fixed frames yet";color:var(--onSurfaceVariant);font-size:12px}
+    #frlist .chip{padding:0 12px;height:32px}
+    #frlist .chip.cur{background:var(--primary);color:var(--onPrimary)}
+    .frapply{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 8px}
+    .frapply label{font:500 14px/20px Roboto,system-ui,sans-serif}
+    .frapply input[type=number]{width:72px;height:40px;border-radius:12px;border:1px solid var(--outline);background:var(--surfaceContainerHighest);color:var(--onSurface);font:500 14px Roboto,system-ui,sans-serif;text-align:center}
+    .frrow{display:flex;gap:8px;flex-wrap:wrap;padding:4px 8px 8px}
+    .frrow .btn[hidden]{display:none}
+    #fredbox[hidden]{display:none}
+    #fixbar{position:fixed;left:8px;right:8px;bottom:calc(8px + var(--safe-area-inset-bottom,0px));z-index:10;display:flex;align-items:center;gap:8px;padding:8px 8px 8px 16px;border-radius:20px;background:var(--primaryContainer);color:var(--onPrimaryContainer);box-shadow:0 4px 16px rgba(0,0,0,.5)}
+    #fixbar[hidden]{display:none}
+    #fixbar .t{flex:1;min-width:0;font:500 13px/18px Roboto,system-ui,sans-serif}
+    #fixbar .btn{padding:0 14px;height:40px}
+    body.editing .fab{display:none}
+    body.editing main{padding-bottom:140px}
   </style>
 </head>
 
@@ -982,6 +1009,31 @@
       </div>
     </section>
     
+    <section class="card" id="frcard" hidden>
+      <div class="title">Frame touch-up</div>
+      <span class="hint" style="display:block;padding:0 8px 4px">Step through every frame. If one still has leftover background, tap Edit this frame, fix it with the controls above (seeds, tolerance, gaps...) and save. Only that frame changes. Set your frame rate first: frames are listed at the export frame rate.</span>
+      <div class="sl">
+        <div class="top"><label for="fr">Frame</label><output id="fro">1 / 1</output></div>
+        <input type="range" id="fr" min="1" max="1" step="1" value="1">
+        <div id="frmk"></div>
+      </div>
+      <div class="frnav">
+        <button class="iconbtn" id="frprev" type="button" aria-label="Previous frame"><svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+        <button class="iconbtn" id="frnext" type="button" aria-label="Next frame"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
+        <span class="grow"></span>
+        <button class="btn" id="fredit" type="button">Edit this frame</button>
+      </div>
+      <div id="frstat">Using the global settings</div>
+      <div id="fredbox" hidden>
+        <div class="frapply"><label for="frn">Also apply to the next frames</label><input type="number" id="frn" min="0" max="200" value="0"></div>
+        <span class="hint" style="display:block;padding:0 8px 6px">Handy when the same gap stays open for several frames. Seeds are positional, so check those frames afterwards.</span>
+        <div class="frrow"><button class="btn tonal" id="frrm" type="button" hidden>Remove fix from this frame</button></div>
+      </div>
+      <div class="title" style="margin-top:12px">Fixed frames (tap to load)</div>
+      <div id="frlist"></div>
+      <div class="frrow"><button class="btn tonal" id="frclr" type="button" hidden>Clear all fixes</button></div>
+    </section>
+    
     <section class="card">
       <div class="title">Output</div>
       <div class="fmt">
@@ -1057,6 +1109,12 @@
         <div class="cfmrow"><button class="btn tonal" id="cno" type="button">Keep going</button><button class="btn" id="cyes" type="button">Stop</button></div>
       </div>
     </div>
+  </div>
+  <div id="fixbar" hidden>
+    <div class="t" id="fbt">Editing frame</div>
+    <button class="btn tonal" id="fbc" type="button">Cancel</button>
+    <button class="btn tonal" id="fbn" type="button">Save &amp; next</button>
+    <button class="btn" id="fbs" type="button">Save</button>
   </div>
   <button class="btn fab" id="go" type="button" disabled><svg viewBox="0 0 24 24">
       <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
@@ -1201,8 +1259,8 @@ function despeck(A,w,h,minSize,V,ST){ // delete visible blobs smaller than minSi
     if(tail<minSize)for(let k=0;k<tail;k++)A[ST[k]]=0;
   }
 }
-function refineAlpha(A,B,w,h){
-  const spk=+$('rfs').value,sx=+$('rfx').value,sm=+$('rfm').value,fe=+$('rff').value;
+function refineAlpha(A,B,w,h,C){
+  const spk=C.rfs,sx=C.rfx,sm=C.rfm,fe=C.rff;
   if(spk>0)despeck(A,w,h,spk,B.V,B.ST);
   if(sx!==0){ // whole pixels, then a fractional last step blended in for sub-pixel control
     const ab=Math.abs(sx),whole=Math.floor(ab),fr=ab-whole,grow=sx>0;
@@ -1216,15 +1274,16 @@ function refineAlpha(A,B,w,h){
   }
   if(fe>0){boxBlur(A,B.T,w,h,fe);boxBlur(A,B.T,w,h,fe)}
 }
-function advCutout(A,w,h,B,D,keyList){
+function advCutout(A,w,h,B,D,keyList,C){
+  const seeds=C.seeds;
   // Tap Erase method: flood fill from each seed, spreading to pixels whose RGB is within a tolerance
   // of the tapped color (measured on the real picture, not the chroma-key alpha).
   const n=w*h,M=B.M,F=B.F,R=B.R,W=B.W,Q=B.ST;
-  let g=+$('acl').value;if(g>0)g=Math.max(1,Math.round(g*w/480));
-  const big=+$('acg').value/100*n,soft=$('acs').checked;
-  const lim=Math.pow(+$('act').value*4.41,2);
+  let g=C.acl;if(g>0)g=Math.max(1,Math.round(g*w/480));
+  const big=C.acg/100*n,soft=C.acs;
+  const lim=Math.pow(C.act*4.41,2);
   const refs=[];for(const s of seeds)if(s.c)refs.push(s.c);
-  if($('acb').checked)for(const k of keyList)refs.push(k);
+  if(C.acb)for(const k of keyList)refs.push(k);
   if(!refs.length)return;
   for(let j=0,i=0;j<n;j++,i+=4){
     const r=D[i],gg=D[i+1],b=D[i+2];let m=0;
@@ -1249,7 +1308,7 @@ function advCutout(A,w,h,B,D,keyList){
   }
   R.fill(0);let qt=0,qh=0;
   const push=j=>{if(F[j]&&!R[j]){R[j]=1;Q[qt++]=j}};
-  if($('acb').checked){
+  if(C.acb){
     for(let x=0;x<w;x++){push(x);push((h-1)*w+x)}
     for(let y=0;y<h;y++){push(y*w);push(y*w+w-1)}
   }
@@ -1294,11 +1353,13 @@ function advCutout(A,w,h,B,D,keyList){
   }
   for(let j=0;j<n;j++){if(R[j])A[j]=0;else if(soft&&edge[j])A[j]*=0.5}
 }
-function keyFrame(d,w,h){
-  const sim=$('sim').value*1.5,smo=$('smo').value*1.5,sp=$('spill').checked;
-  const K=keys.map(k=>{const [c,q]=cbcr(...k);return{c,q,ch:k[1]>=k[0]&&k[1]>=k[2]?1:(k[2]>k[0]?2:0)}});
-  const n=K.length;if(!n)return;const K0=keys;
-  const ok=w>0&&h>0&&d.length===w*h*4,rf=$('rf').checked&&ok,ac=$('ac').checked&&ok,use=rf||ac;
+function readCfg(){return{sim:+$('sim').value,smo:+$('smo').value,spill:$('spill').checked,rf:$('rf').checked,rfs:+$('rfs').value,rfx:+$('rfx').value,rfm:+$('rfm').value,rff:+$('rff').value,ac:$('ac').checked,acb:$('acb').checked,act:+$('act').value,acs:$('acs').checked,acl:+$('acl').value,acg:+$('acg').value,keys:keys,seeds:seeds}}
+function keyFrame(d,w,h,C){
+  C=C||readCfg();
+  const sim=C.sim*1.5,smo=C.smo*1.5,sp=C.spill;
+  const K=C.keys.map(k=>{const [c,q]=cbcr(...k);return{c,q,ch:k[1]>=k[0]&&k[1]>=k[2]?1:(k[2]>k[0]?2:0)}});
+  const n=K.length;if(!n)return;const K0=C.keys;
+  const ok=w>0&&h>0&&d.length===w*h*4,rf=C.rf&&ok,ac=C.ac&&ok,use=rf||ac;
   const B=use?rbufs(w*h):null;
   const Kc=new Float64Array(n),Kq=new Float64Array(n);for(let j=0;j<n;j++){Kc[j]=K[j].c;Kq[j]=K[j].q}
   for(let i=0;i<d.length;i+=4){
@@ -1317,8 +1378,8 @@ function keyFrame(d,w,h){
     }
   }
   if(use){
-    if(ac)advCutout(B.A,w,h,B,d,K0);
-    if(rf)refineAlpha(B.A,B,w,h);
+    if(ac)advCutout(B.A,w,h,B,d,K0,C);
+    if(rf)refineAlpha(B.A,B,w,h,C);
     for(let i=0,j=0;i<d.length;i+=4,j++){
       const a=B.A[j];d[i+3]=a;
       if(sp&&a>0&&a<255){ // spill cleanup on the refined edge (incl. pixels revealed by Expand)
@@ -1350,8 +1411,10 @@ function draw(){
   if(!loaded)return;
   ctx.clearRect(0,0,cv.width,cv.height);
   ctx.drawImage(v.el||v,0,0,cv.width,cv.height);
-  const im=ctx.getImageData(0,0,cv.width,cv.height);keyFrame(im.data,cv.width,cv.height);ctx.putImageData(im,0,0);
-  if($('ac').checked&&seeds.length){const rad=Math.max(4,cv.width/110);for(const s of seeds){const px=s.nx*(cv.width-1),py=s.ny*(cv.height-1);ctx.beginPath();ctx.arc(px,py,rad,0,6.2832);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=Math.max(1.5,rad/3);ctx.strokeStyle='#e91e63';ctx.stroke()}}
+  const fx=editing?null:fixAt(v.currentTime||0),C=fx||readCfg();
+  const im=ctx.getImageData(0,0,cv.width,cv.height);keyFrame(im.data,cv.width,cv.height,C);ctx.putImageData(im,0,0);
+  if(!fx)frameUI();
+  if(!fx&&$('ac').checked&&seeds.length){const rad=Math.max(4,cv.width/110);for(const s of seeds){const px=s.nx*(cv.width-1),py=s.ny*(cv.height-1);ctx.beginPath();ctx.arc(px,py,rad,0,6.2832);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=Math.max(1.5,rad/3);ctx.strokeStyle='#e91e63';ctx.stroke()}}
   dirty=false;
 }
 /* ---- power saving: redraw only when something changed ---- */
@@ -1428,11 +1491,11 @@ function showInfo(){
   };
   vid.requestVideoFrameCallback(cb);
 }
-const ready=()=>{seeds=[];updSeeds();loaded=true;showInfo();$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(previewW());lastFrameKey=-1;dirty=true;lastActive=performance.now();
+const ready=()=>{if(editing)endEdit();fixes=[];frameUI.sig=null;seeds=[];updSeeds();loaded=true;showInfo();$('empty').hidden=true;$('change').hidden=false;$('go').disabled=false;$('pp').disabled=false;fit(previewW());lastFrameKey=-1;dirty=true;lastActive=performance.now();
 document.querySelector('.stage').style.aspectRatio=v.videoWidth+' / '+v.videoHeight;
 const wd=$('wd'),vw=v.videoWidth;wd.max=vw;wd.min=Math.min(120,vw);wd.step=1;
 wd.value=Math.min(+wd.value,vw);$('wdo').textContent=wd.value;paint(wd);
-v.play().catch(()=>{});setIcon();draw();cancelAnimationFrame(raf);loop()};
+$('frcard').hidden=false;v.play().catch(()=>{});setIcon();frameUI(true);draw();cancelAnimationFrame(raf);loop()};
 $('file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
   e.target.value='';
@@ -1443,7 +1506,7 @@ $('file').onchange=async e=>{
     const hint=document.querySelector('#empty .hint'),old=hint.textContent;hint.textContent='Decoding frames…';
     try{
       const a=await decodeAnim(f);
-      a.addEventListener('play',setIcon);a.addEventListener('pause',setIcon);
+      a.addEventListener('play',setIcon);a.addEventListener('pause',setIcon);a.addEventListener('seeked',markDirty);
       v=a;ready();
     }catch(err){alert(err.message||'Could not read this file.')}
     hint.textContent=old;
@@ -1472,6 +1535,120 @@ cv.onclick=e=>{
   updSeeds();
   renderChips();draw();
 };
+
+/* ---- Frame touch-up: per-frame overrides ---- */
+let fixes=[],editing=null,gBackup=null,scrub=false;
+const frFps=()=>getFps()||10;
+const frTotal=()=>Math.max(1,Math.floor(v.duration*frFps()));
+const frTime=i=>Math.min(i/frFps(),v.duration-0.01);
+const frIdx=t=>Math.max(0,Math.min(frTotal()-1,Math.round(t*frFps())));
+function fixEntry(t,fps){ // nearest saved fix within half a frame
+  const tol=0.5/(fps||frFps())+1e-6;let best=null,bd=1e9;
+  for(const f of fixes){const d=Math.abs(f.t-t);if(d<=tol&&d<bd){bd=d;best=f}}
+  return best;
+}
+function fixAt(t,fps){const e=fixes.length?fixEntry(t,fps):null;return e?e.cfg:null}
+function snap(){ // deep copy of everything that shapes the key
+  const c=readCfg();
+  return{...c,keys:c.keys.map(k=>k.slice()),seeds:c.seeds.map(s=>({nx:s.nx,ny:s.ny,c:s.c.slice(),ki:c.keys.indexOf(s.k)})),keyDefault};
+}
+function cloneCfg(c){return{...c,keys:c.keys.map(k=>k.slice()),seeds:c.seeds.map(s=>({...s,c:s.c.slice()}))}}
+// stored configs keep seed->key links as indexes; the keyer wants seed.c only, so they work as-is
+function loadCfg(c){ // put a stored config back into the controls
+  keys=c.keys.map(k=>k.slice());
+  seeds=c.seeds.map(s=>({nx:s.nx,ny:s.ny,c:s.c.slice(),k:keys[s.ki]||keys[0]}));
+  keyDefault=!!c.keyDefault;
+  const nums={sim:c.sim,smo:c.smo,rfs:c.rfs,rfx:c.rfx,rfm:c.rfm,rff:c.rff,acl:c.acl,acg:c.acg,act:c.act};
+  for(const k in nums){$(k).value=nums[k];$(k+'o').textContent=$(k).value;paint($(k))}
+  $('spill').checked=c.spill;$('rf').checked=c.rf;$('ac').checked=c.ac;$('acb').checked=c.acb;$('acs').checked=c.acs;
+  $('rfbox').hidden=!c.rf;syncMode();updSeeds();renderChips();
+}
+function frameUI(force){
+  if(!loaded||(scrub&&!force))return;
+  const n=frTotal(),t=v.currentTime||0,i=editing?editing.i:frIdx(t);
+  const sl=$('fr');sl.min=1;sl.max=n;if(+sl.value!==i+1)sl.value=i+1;paint(sl);
+  $('fro').textContent=(i+1)+' / '+n;
+  const fx=fixEntry(editing?editing.t:frTime(i));
+  const st=$('frstat');
+  if(editing){st.className='edit';st.textContent='Editing frame '+(i+1)+' · changes apply to this frame only'}
+  else if(fx){st.className='fixed';st.textContent='Frame '+(i+1)+' has a custom fix'}
+  else{st.className='';st.textContent='Frame '+(i+1)+' uses the global settings'}
+  const sig=fixes.map(f=>f.t.toFixed(4)).join(',')+'|'+i+'|'+n;
+  if(frameUI.sig!==sig){
+    frameUI.sig=sig;
+    const mk=$('frmk');mk.innerHTML='';
+    for(const f of fixes){const e=document.createElement('i');e.style.left=(f.t/v.duration*100)+'%';if(frIdx(f.t)===i)e.className='cur';mk.appendChild(e)}
+    const list=$('frlist');list.innerHTML='';
+    for(const f of fixes){
+      const fi=frIdx(f.t),b=document.createElement('button');b.type='button';b.className='chip'+(fi===i?' cur':'');b.textContent='#'+(fi+1);
+      b.onclick=()=>startEdit(fi);list.appendChild(b);
+    }
+  }
+  $('frclr').hidden=!fixes.length;
+  $('fredbox').hidden=!editing;
+  $('fredit').textContent=editing?'Editing…':(fx?'Re-edit this frame':'Edit this frame');
+  $('fredit').disabled=!!editing;
+  $('frrm').hidden=!(editing&&fixEntry(editing.t));
+}
+function goFrame(i){
+  i=Math.max(0,Math.min(frTotal()-1,i));
+  v.pause();v.currentTime=frTime(i);markDirty();draw();frameUI(true);
+}
+const busyEdit=()=>{$('fixbar').animate([{transform:'translateY(0)'},{transform:'translateY(-8px)'},{transform:'translateY(0)'}],{duration:240});frameUI(true)};
+$('fr').oninput=()=>{if(editing)return busyEdit();scrub=true;goFrame(+$('fr').value-1);scrub=false};
+$('frprev').onclick=()=>{if(editing)return busyEdit();goFrame(frIdx(v.currentTime||0)-1)};
+$('frnext').onclick=()=>{if(editing)return busyEdit();goFrame(frIdx(v.currentTime||0)+1)};
+function beginEdit(i,cfgIfNew){
+  const t=frTime(i),fx=fixEntry(t);
+  gBackup=snap();
+  v.pause();v.currentTime=t;
+  if(fx)loadCfg(fx.cfg);else if(cfgIfNew)loadCfg(cfgIfNew);
+  editing={i,t};
+  document.body.classList.add('editing');$('fixbar').hidden=false;
+  $('fbt').textContent='Frame '+(i+1)+(fx?' (re-editing)':'');
+  markDirty();draw();frameUI(true);
+}
+function endEdit(){
+  editing=null;
+  if(gBackup)loadCfg(gBackup);gBackup=null;
+  document.body.classList.remove('editing');$('fixbar').hidden=true;
+}
+function startEdit(i){
+  if(!loaded)return;
+  if(editing)endEdit();
+  beginEdit(i);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function cancelEdit(){
+  if(!editing)return;
+  const i=editing.i;endEdit();goFrame(i);
+}
+function saveEdit(next){
+  if(!editing)return;
+  const i=editing.i,cfg=snap(),n=Math.max(0,Math.min(200,Math.floor(+$('frn').value||0))),total=frTotal();
+  for(let k=0;k<=n&&i+k<total;k++){
+    const tk=frTime(i+k),old=fixEntry(tk);
+    if(old)fixes.splice(fixes.indexOf(old),1);
+    fixes.push({t:tk,cfg:cloneCfg(cfg)});
+  }
+  fixes.sort((a,b)=>a.t-b.t);
+  endEdit();$('frn').value=0;
+  const last=Math.min(total-1,i+n);
+  if(next&&last+1<total){v.currentTime=frTime(last+1);beginEdit(last+1,cfg)} // carry the same settings forward
+  else goFrame(last);
+}
+$('fredit').onclick=()=>startEdit(frIdx(v.currentTime||0));
+$('fbs').onclick=()=>saveEdit(false);
+$('fbn').onclick=()=>saveEdit(true);
+$('fbc').onclick=()=>cancelEdit();
+$('frrm').onclick=()=>{
+  if(!editing)return;const e=fixEntry(editing.t),i=editing.i;
+  if(e)fixes.splice(fixes.indexOf(e),1);
+  endEdit();goFrame(i);
+};
+$('frclr').onclick=()=>{if(editing)endEdit();fixes=[];markDirty();draw();frameUI(true)};
+$('fps').addEventListener('input',()=>frameUI(true));
+$('ofps').addEventListener('change',()=>frameUI(true));
 
 /* ---- GIF encoder ---- */
 function lzw(px,mc){
@@ -1657,13 +1834,14 @@ $('go').onclick=async()=>{
   const total=Math.max(1,Math.floor(v.duration*fps));
   const c=document.createElement('canvas');c.width=w;c.height=h;
   const x=c.getContext('2d',{willReadFrequently:true});
-  const frames=[];
+  const frames=[],gcfg=readCfg();
   try{
     for(let i=0;i<total;i++){
-      await seek(Math.min(i/fps,v.duration-0.01));
+      const ti=Math.min(i/fps,v.duration-0.01);
+      await seek(ti);
       if(cancelReq)throw CANCEL();
       x.clearRect(0,0,w,h);x.drawImage(v.el||v,0,0,w,h);
-      const im=x.getImageData(0,0,w,h);keyFrame(im.data,w,h);
+      const im=x.getImageData(0,0,w,h);keyFrame(im.data,w,h,fixAt(ti,fps)||gcfg);
       if($('fmt').value==='gif')frames.push(im.data);
       else{
         x.putImageData(im,0,0);

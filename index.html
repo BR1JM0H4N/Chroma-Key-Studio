@@ -175,29 +175,23 @@
     #bgs button[data-b=grey] { background: #808080 }
     #bgs button[data-b=hc] { background: repeating-conic-gradient(#000 0 25%, #fff 0 50%) 0 0/8px 8px }
     
-    #dock {
+    /* the single preview floats to the top when you scroll past it */
+    .stage.docked {
       position: fixed;
-      left: 0; right: 0;
-      top: 0;
-      height: calc(50vh);
-      padding-top: var(--safe-area-inset-top, 0px);
-      z-index: 8;
-      background: var(--surface);
-      box-shadow: 0 4px 16px rgba(0,0,0,.5);
-      transform: translateY(-110%);
-      transition: transform .2s;
-      pointer-events: none
-    }
-    #dock.show { transform: none; pointer-events: auto }
-    #dock .dstage {
-      position: absolute;
-      inset: calc(var(--safe-area-inset-top, 0px) + 8px) 8px 8px 8px;
+      top: calc(var(--safe-area-inset-top, 0px) + 8px);
+      left: 8px; right: 8px;
+      width: auto;
+      height: calc(50vh - 8px);
+      max-height: none;
+      aspect-ratio: auto !important;
+      margin: 0;
       border-radius: 16px;
-      overflow: hidden;
-      background: var(--pvbg)
+      z-index: 8;
+      box-shadow: 0 4px 16px rgba(0,0,0,.5)
     }
-    #dock canvas { cursor: default }
-    #dock .iconbtn { position: absolute; right: 8px; bottom: 8px; z-index: 2 }
+    #pp2 { position: absolute; right: 8px; bottom: 8px; z-index: 2 }
+    .stage:not(.docked) #pp2 { display: none }
+    .sl[hidden] { display: none }
     
     canvas {
       position: absolute;
@@ -881,14 +875,13 @@
       </svg></div>
     <h1>Chroma Key Studio</h1>
   </header>
-  <div id="dock" aria-hidden="true"><div class="dstage"><canvas id="cv2" width="480" height="270"></canvas>
-    <button class="iconbtn" id="pp2" type="button" aria-label="Play or pause"><svg id="ppi2" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg></button></div></div>
   <main>
     <input type="file" id="file" accept="video/*,image/gif,image/webp" hidden>
     
     <section class="card low">
-      <div class="stage">
+      <div id="stageWrap"><div class="stage">
         <canvas id="cv" width="480" height="270"></canvas>
+        <button class="iconbtn" id="pp2" type="button" aria-label="Play or pause"><svg id="ppi2" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg></button>
         <div id="empty">
           <div class="ic"><svg viewBox="0 0 24 24">
               <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" />
@@ -897,7 +890,7 @@
           </div>
           <button class="btn" id="pick" type="button">Select file</button>
         </div>
-      </div>
+      </div></div>
       <div id="info" hidden><span id="i_fps">–</span><span id="i_size">–</span><span id="i_res">–</span></div>
       <div class="actions">
         <button class="btn tonal" id="change" type="button" hidden>Change file</button>
@@ -972,7 +965,13 @@
           <div class="l"><b>Use frame edges as seeds</b><span class="hint">Background touching the frame border is removed automatically</span></div><label class="switch"><input type="checkbox" id="acb" checked><span></span></label>
         </div>
         <div class="sl">
-          <div class="top"><label for="acl">Leak guard (px)</label><output id="aclo">0</output></div><input type="range" id="acl" min="0" max="4" value="0">
+          <div class="top"><label for="act">Tolerance (like Tap Erase)</label><output id="acto">25</output></div><input type="range" id="act" min="1" max="100" value="25">
+        </div>
+        <div class="sr">
+          <div class="l"><b>Soften edges</b><span class="hint">Halve the opacity of subject pixels touching the removed background</span></div><label class="switch"><input type="checkbox" id="acs" checked><span></span></label>
+        </div>
+        <div class="sl">
+          <div class="top"><label for="acl">Leak guard (px)</label><output id="aclo">0</output></div><input type="range" id="acl" min="0" max="8" value="0">
         </div>
         <div class="sl">
           <div class="top"><label for="acg">Also remove enclosed gaps larger than (% of frame)</label><output id="acgo">0</output></div><input type="range" id="acg" min="0" max="10" step="0.1" value="0">
@@ -1109,20 +1108,23 @@ const cv=$('cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
 let keys=[[0,255,0]],keyDefault=true,loaded=false;
 let seeds=[];const updSeeds=()=>{$('acn').textContent='Seeds: '+seeds.length};
 const paint=el=>el.style.setProperty('--p',((el.value-el.min)/(el.max-el.min)*100)+'%');
-['sim','smo','fps','wd','q','rfs','rfx','rfm','rff','acl','acg'].forEach(k=>{paint($(k));$(k).oninput=()=>{$(k+'o').textContent=$(k).value;paint($(k));draw()}});
-const cv2=$('cv2'),ctx2=cv2.getContext('2d');let dockOn=false;
+['sim','smo','fps','wd','q','rfs','rfx','rfm','rff','acl','acg','act'].forEach(k=>{paint($(k));$(k).oninput=()=>{$(k+'o').textContent=$(k).value;paint($(k));draw()}});
+let dockOn=false;
 document.querySelectorAll('#bgs button').forEach(b=>b.onclick=()=>{
   document.body.dataset.bg=b.dataset.b;
   document.querySelectorAll('#bgs button').forEach(x=>x.classList.toggle('on',x===b));
 });
 let stagePast=false;
 function updateDock(){
-  const o=$('out'),hit=o.childElementCount>0&&o.getBoundingClientRect().top<$('dock').offsetHeight;
+  const o=$('out'),st=document.querySelector('.stage'),wrap=$('stageWrap');
+  const hit=o.childElementCount>0&&o.getBoundingClientRect().top<innerHeight*0.5;
   const on=loaded&&stagePast&&!hit;
   if(on===dockOn)return;
-  dockOn=on;$('dock').classList.toggle('show',on);$('dock').setAttribute('aria-hidden',!on);if(on)draw();
+  if(on)wrap.style.height=st.offsetHeight+'px'; // placeholder keeps the page from jumping
+  else wrap.style.height='';
+  dockOn=on;st.classList.toggle('docked',on);
 }
-new IntersectionObserver(([e])=>{stagePast=e.intersectionRatio<0.5&&e.boundingClientRect.top<0;updateDock()},{threshold:[0.5]}).observe(document.querySelector('.stage'));
+new IntersectionObserver(([e])=>{stagePast=e.intersectionRatio<0.5&&e.boundingClientRect.top<0;updateDock()},{threshold:[0.5]}).observe($('stageWrap'));
 addEventListener('scroll',updateDock,{passive:true});addEventListener('resize',updateDock);
 const pick=()=>$('file').click();
 $('pick').onclick=pick;$('change').onclick=pick;
@@ -1137,7 +1139,8 @@ const setIcon=()=>{const h=v.paused?'<path d="M8 5v14l11-7z"/>':'<path d="M6 19h
 vid.addEventListener('play',setIcon);vid.addEventListener('pause',setIcon);
 $('spill').onchange=draw;
 $('rf').onchange=()=>{$('rfbox').hidden=!$('rf').checked;draw()};
-$('ac').onchange=()=>{$('acbox').hidden=!$('ac').checked;draw()};
+const syncMode=()=>{const on=$('ac').checked;$('acbox').hidden=!on;$('sim').closest('.sl').hidden=on;$('smo').closest('.sl').hidden=on};
+$('ac').onchange=()=>{syncMode();draw()};syncMode();
 $('acb').onchange=draw;
 $('acc').onclick=()=>{seeds=[];updSeeds();draw()};
 
@@ -1210,23 +1213,37 @@ function refineAlpha(A,B,w,h){
   }
   if(fe>0){boxBlur(A,B.T,w,h,fe);boxBlur(A,B.T,w,h,fe)}
 }
-function advCutout(A,w,h,B){
+function advCutout(A,w,h,B,D,keyList){
+  // Tap Erase method: flood fill from each seed, spreading to pixels whose RGB is within a tolerance
+  // of the tapped color (measured on the real picture, not the chroma-key alpha).
   const n=w*h,M=B.M,F=B.F,R=B.R,W=B.W,Q=B.ST;
   let g=+$('acl').value;if(g>0)g=Math.max(1,Math.round(g*w/480));
-  const big=+$('acg').value/100*n;
-  for(let j=0;j<n;j++)M[j]=A[j]<128?1:0; // 1 = background-colored
-  // leak guard: keep the fill away from the subject so small gaps in its outline can't be crossed
-  if(g>0){
-    for(let j=0;j<n;j++)R[j]=M[j]?0:1;
-    for(let it=0;it<g;it++){
-      W.set(R);
+  const big=+$('acg').value/100*n,soft=$('acs').checked;
+  const lim=Math.pow(+$('act').value*4.41,2);
+  const refs=[];for(const s of seeds)if(s.c)refs.push(s.c);
+  if($('acb').checked)for(const k of keyList)refs.push(k);
+  if(!refs.length)return;
+  for(let j=0,i=0;j<n;j++,i+=4){
+    const r=D[i],gg=D[i+1],b=D[i+2];let m=0;
+    for(let k=0;k<refs.length;k++){
+      const c=refs[k],dr=r-c[0],dg=gg-c[1],db=b-c[2];
+      if(dr*dr+dg*dg+db*db<=lim){m=1;break}
+    }
+    F[j]=m;M[j]=m||A[j]<128?1:0; // F = looks like a tapped color, M = anything background-like
+  }
+  const grow=(src,limMask,it)=>{
+    for(let i=0;i<it;i++){
+      W.set(src);
       for(let y=0,j=0;y<h;y++)for(let x=0;x<w;x++,j++){
-        if(!R[j]&&((x>0&&W[j-1])||(x<w-1&&W[j+1])||(y>0&&W[j-w])||(y<h-1&&W[j+w])))R[j]=1;
+        if(!src[j]&&limMask[j]&&((x>0&&W[j-1])||(x<w-1&&W[j+1])||(y>0&&W[j-w])||(y<h-1&&W[j+w])))src[j]=1;
       }
     }
-    for(let j=0;j<n;j++)F[j]=M[j]&&!R[j]?1:0;
-  }else F.set(M);
-  // flood fill from seeds (and optionally the frame edges)
+  };
+  if(g>0){ // optional leak guard: thicken everything that is not background so outline gaps are sealed
+    for(let j=0;j<n;j++)R[j]=F[j]?0:1;
+    W.fill(1);grow(R,W,g);
+    for(let j=0;j<n;j++)F[j]=F[j]&&!R[j]?1:0;
+  }
   R.fill(0);let qt=0,qh=0;
   const push=j=>{if(F[j]&&!R[j]){R[j]=1;Q[qt++]=j}};
   if($('acb').checked){
@@ -1246,15 +1263,9 @@ function advCutout(A,w,h,B){
     const j=Q[qh++],x=j%w;
     if(x>0)push(j-1);if(x<w-1)push(j+1);if(j>=w)push(j-w);if(j<n-w)push(j+w);
   }
-  // grow back toward the subject by g px (undoes the leak-guard gap) without leaving the background mask
-  for(let it=0;it<g;it++){
-    W.set(R);
-    for(let y=0,j=0;y<h;y++)for(let x=0;x<w;x++,j++){
-      if(!R[j]&&M[j]&&((x>0&&W[j-1])||(x<w-1&&W[j+1])||(y>0&&W[j-w])||(y<h-1&&W[j+w])))R[j]=1;
-    }
-  }
-  // background-colored pixels the fill never reached are enclosed by the subject: restore them
-  if(big>0){ // ...unless the enclosed region is large (a gap between arm and body), then it stays removed
+  if(g>0)grow(R,M,g); // undo the guard gap
+  // background-like pixels the fill never reached are enclosed by the subject: restore them
+  if(big>0){
     W.fill(0);
     for(let s=0;s<n;s++){
       if(!M[s]||R[s]||W[s])continue;
@@ -1266,16 +1277,24 @@ function advCutout(A,w,h,B){
         if(j>=w&&M[j-w]&&!R[j-w]&&!W[j-w]){W[j-w]=1;Q[t2++]=j-w}
         if(j<n-w&&M[j+w]&&!R[j+w]&&!W[j+w]){W[j+w]=1;Q[t2++]=j+w}
       }
-      if(t2<big)for(let k=0;k<t2;k++)A[Q[k]]=255;
+      if(t2<big){for(let k=0;k<t2;k++)A[Q[k]]=255}else{for(let k=0;k<t2;k++)R[Q[k]]=1}
     }
   }else{
     for(let j=0;j<n;j++)if(M[j]&&!R[j])A[j]=255;
   }
+  // everything outside the removed area is opaque subject, as in Tap Erase
+  for(let j=0;j<n;j++)if(!R[j]&&A[j]<255&&!M[j])A[j]=255;
+  const edge=soft?new Uint8Array(n):null;
+  if(soft)for(let y=0,j=0;y<h;y++)for(let x=0;x<w;x++,j++){
+    if(R[j])continue;
+    if((x>0&&R[j-1])||(x<w-1&&R[j+1])||(y>0&&R[j-w])||(y<h-1&&R[j+w]))edge[j]=1;
+  }
+  for(let j=0;j<n;j++){if(R[j])A[j]=0;else if(soft&&edge[j])A[j]*=0.5}
 }
 function keyFrame(d,w,h){
   const sim=$('sim').value*1.5,smo=$('smo').value*1.5,sp=$('spill').checked;
   const K=keys.map(k=>{const [c,q]=cbcr(...k);return{c,q,ch:k[1]>=k[0]&&k[1]>=k[2]?1:(k[2]>k[0]?2:0)}});
-  const n=K.length;if(!n)return;
+  const n=K.length;if(!n)return;const K0=keys;
   const ok=w>0&&h>0&&d.length===w*h*4,rf=$('rf').checked&&ok,ac=$('ac').checked&&ok,use=rf||ac;
   const B=use?rbufs(w*h):null;
   for(let i=0;i<d.length;i+=4){
@@ -1293,7 +1312,7 @@ function keyFrame(d,w,h){
     }
   }
   if(use){
-    if(ac)advCutout(B.A,w,h,B);
+    if(ac)advCutout(B.A,w,h,B,d,K0);
     if(rf)refineAlpha(B.A,B,w,h);
     for(let i=0,j=0;i<d.length;i+=4,j++){
       const a=B.A[j];d[i+3]=a;
@@ -1316,7 +1335,7 @@ function renderChips(){
     const b=document.createElement('button');b.type='button';b.className='chip';b.setAttribute('aria-label','Remove '+hex(k));
     b.innerHTML='<i></i><span></span><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
     b.firstChild.style.background=hex(k);b.children[1].textContent=hex(k);
-    b.onclick=()=>{keys.splice(i,1);keyDefault=false;renderChips();draw()};
+    b.onclick=()=>{const gone=keys.splice(i,1)[0];seeds=seeds.filter(s=>s.k!==gone);updSeeds();keyDefault=false;renderChips();draw()};
     box.appendChild(b);
   });
 }
@@ -1328,7 +1347,6 @@ function draw(){
   ctx.drawImage(v.el||v,0,0,cv.width,cv.height);
   const im=ctx.getImageData(0,0,cv.width,cv.height);keyFrame(im.data,cv.width,cv.height);ctx.putImageData(im,0,0);
   if($('ac').checked&&seeds.length){const rad=Math.max(4,cv.width/110);for(const s of seeds){const px=s.nx*(cv.width-1),py=s.ny*(cv.height-1);ctx.beginPath();ctx.arc(px,py,rad,0,6.2832);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=Math.max(1.5,rad/3);ctx.strokeStyle='#e91e63';ctx.stroke()}}
-  if(dockOn){if(cv2.width!==cv.width||cv2.height!==cv.height){cv2.width=cv.width;cv2.height=cv.height}ctx2.clearRect(0,0,cv2.width,cv2.height);ctx2.drawImage(cv,0,0)}
 }
 let raf;function loop(){if(!exporting)draw();raf=requestAnimationFrame(loop)}
 let srcBase='video';
@@ -1398,14 +1416,18 @@ cv.onclick=e=>{
   const t=document.createElement('canvas');t.width=cv.width;t.height=cv.height;
   const c=t.getContext('2d');c.drawImage(v.el||v,0,0,t.width,t.height);
   const r=cv.getBoundingClientRect();
-  const x=Math.floor((e.clientX-r.left)*cv.width/r.width),y=Math.floor((e.clientY-r.top)*cv.height/r.height);
+  const sc=Math.min(r.width/cv.width,r.height/cv.height),ox=(r.width-cv.width*sc)/2,oy=(r.height-cv.height*sc)/2;
+  const x=Math.floor((e.clientX-r.left-ox)/sc),y=Math.floor((e.clientY-r.top-oy)/sc);
+  if(x<0||y<0||x>=cv.width||y>=cv.height)return;
   const p=c.getImageData(x,y,1,1).data;const nk=[p[0],p[1],p[2]];
   if(keyDefault){keys=[];keyDefault=false}
-  if($('ac').checked){if(seeds.length>=12)seeds.shift();seeds.push({nx:x/Math.max(1,cv.width-1),ny:y/Math.max(1,cv.height-1)});updSeeds()}
-  if(!keys.some(k=>Math.hypot(k[0]-nk[0],k[1]-nk[1],k[2]-nk[2])<12)){
-    if(keys.length>=8)keys.shift();
-    keys.push(nk);
+  let kk=keys.find(k=>Math.hypot(k[0]-nk[0],k[1]-nk[1],k[2]-nk[2])<12);
+  if(!kk){
+    if(keys.length>=8){const gone=keys.shift();seeds=seeds.filter(s=>s.k!==gone)} // dropped key takes its seeds with it
+    keys.push(nk);kk=nk;
   }
+  if($('ac').checked){if(seeds.length>=12)seeds.shift();seeds.push({nx:x/Math.max(1,cv.width-1),ny:y/Math.max(1,cv.height-1),c:nk,k:kk})}
+  updSeeds();
   renderChips();draw();
 };
 
